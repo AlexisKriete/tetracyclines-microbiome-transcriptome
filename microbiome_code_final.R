@@ -1,9 +1,40 @@
-## Install packages and load libraries ##
+#----------------------------------------------------------------------
+# Install packages and load libraries
+#----------------------------------------------------------------------
 
 install.packages("BiocManager")
 library(BiocManager)
+BiocManager::install("dada2")
+library(dada2)
+BiocManager::install("Biostrings")
+library(Biostrings)
 BiocManager::install("DECIPHER")
+library(DECIPHER)
+BiocManager::install("phyloseq")
+library(phyloseq)
+BiocManager::install("microbiome")
+library(microbiome)
+remotes::install_github("vmikk/metagMisc",force=TRUE)
+library(metagMisc)
+install.packages("SRS")
+library(SRS)
+install.packages("dplyr")
+library(dplyr)
 install.packages("tidyverse")
+library(tidyverse)
+install.packages("ape")
+library(ape)
+install.packages("picante")
+library(picante)
+BiocManager::install("MicEco")
+library(MicEco)
+remotes::install_github("jbisanz/qiime2R",force=TRUE)
+install.packages(
+  "microViz",
+  repos = c(davidbarnett = "https://david-barnett.r-universe.dev", getOption("repos"))
+)
+library(microViz)
+
 BiocManager::install("phyloseq")
 BiocManager::install("microbiome")
 install.packages("vegan")
@@ -59,6 +90,11 @@ library(cowplot)
 library(ggh4x)
 library(qiime2R)
 library(ggforce)
+
+#----------------------------------------------------------------------
+# Import reads and filter with DADA2
+#----------------------------------------------------------------------
+
 
 ## Define the path where the raw reads are located
 
@@ -140,12 +176,14 @@ rownames(track) <- sample.names
 track
 
 # get the total # of reads in the filtered dataset, along with minimum, maximum and mean # of reads/sample
-sum(track[,6])
-min(track[,6])
-max(track[,6])
-mean(track[,6])
+sum(track[,6]) # 8,164,337
+min(track[,6]) # 70,501
+max(track[,6]) # 256,874
+mean(track[,6]) # 151,191.4
 
-# Taxonomic assignment with IDTAXA algorithm
+#----------------------------------------------------------------------
+# Assign taxonomy using IDTAXA
+#----------------------------------------------------------------------
 
 load("/Users/alexiskriete/Desktop/Microbiome/Lc_antibiotic_study/New/raw-reads-demuxed/SILVA_SSU_r138_2019.RData")
 
@@ -156,7 +194,7 @@ ids <- list(1:length(getSequences(seqtab.nochim)))
 for (x in 1:length(getSequences(seqtab.nochim)))
 {if (x %% 100 == 0) {print(c("On sequence",x))}
   dna <- DNAStringSet(getSequences(seqtab.nochim)[x:x])
-ids[x] <- IdTaxa(dna, trainingSet, strand="both", processors=NULL, verbose=FALSE)[1]}
+  ids[x] <- IdTaxa(dna, trainingSet, strand="both", processors=NULL, verbose=FALSE)[1]}
 
 taxid <- t(sapply(ids, function(x) {
   m <- match(ranks, x$rank)
@@ -181,15 +219,7 @@ ps <- phyloseq(otu_table(seqtab.nochim, taxa_are_rows=FALSE),
 # check the ps object
 ps
 
-# Exporting raw data to a csv file for safekeeping -- ASV table
-OTU1 = as(otu_table(ps), "matrix")
-write.csv(as.data.frame(OTU1), file="ASV table raw.csv")
-
-# Exporting raw data to a csv file for safekeeping -- taxa table
-taxa1 = as(tax_table(ps), "matrix")
-write.csv(as.data.frame(taxa1), file="taxa table raw.csv")
-
-# Add refseq slot to our phyloseq object (ps) that shows the DNA sequence associated with each ASV
+# Add refseq slot to our phyloseq object that shows the DNA sequence associated with each ASV
 dna <- Biostrings::DNAStringSet(taxa_names(ps))
 names(dna) <- taxa_names(ps)
 ps <- merge_phyloseq(ps, dna)
@@ -206,7 +236,7 @@ get_taxa_unique(ps, "domain")
 
 # See how many Bacteria and Archaea are in our dataset
 ps_bacteria <- phyloseq::subset_taxa(ps, domain=="Bacteria")
-phyloseq::ntaxa(ps_bacteria) # 23997 ASVs assigned to Bacteria (78% of total ASVs)
+phyloseq::ntaxa(ps_bacteria) # 23995 ASVs assigned to Bacteria (78% of total ASVs)
 ps_archaea <- phyloseq::subset_taxa(ps, domain=="Archaea")
 phyloseq::ntaxa(ps_archaea) # 48 ASVs assigned to Archaea (0.2% of total ASVs)
 
@@ -239,25 +269,25 @@ write.csv(as.data.frame(otu_table(ps_filt_archaea)), file="taxa table archaea.cs
 #### Exporting ASV sequences for cross-checking taxonomic assignments w/BLAST ####
 
 # export .csv file that shows the sequences of the top 50 most abundant ASVs
-write.csv(as.data.frame(refseq(ps_nochloro)[1:50,]), file="ASVseqs_top50.csv")
+write.csv(as.data.frame(refseq(ps_nochloro)[1:50,]), file="newASVseqs_top50.csv")
 
 # export .csv file with the taxonomic assignments of the top 50 most abundant ASVs
-write.csv(tax_table(ps_nochloro)[1:50],file="ASVnames_top50.csv")
+write.csv(tax_table(ps_nochloro)[1:50],file="newASVnames_top50.csv")
 
 # after cross-referencing by BLASTing to the 16S rRNA database, we can narrow down some taxonomic assignments
 # can only find genus-level info at best; no species-level assignments are possible due to the short region sequenced
 # the next few lines of code replace the old data for the top 50 most abundant ASVs with new dta
 
-newNames <- as.matrix(read.csv("/Users/alexiskriete/Desktop/Microbiome/Lc_antibiotic_study/New/raw-reads-demuxed/ASV_names_top50.csv"))
+newNames <- as.matrix(read.csv("ASV_names_top50.csv"))
 newNames2 <- newNames[,-1]
 rownames(newNames2) <- newNames[,1]
 tax_table(ps_nochloro)[1:50,] <- tax_table(newNames2)
 
-# Next, we remove NAs (i.e., ASVs that could not be classified to any level)
+# Next, we remove NAs (i.e., ASVs that could not be classified to any taxonomic level) and Archaea
 # we can do this by keeping only ASVs assigned to Bacteria
 ps_noNAs<- phyloseq::subset_taxa(ps_nochloro, domain=="Bacteria")
 
-# we see that this removes ~22% of all ASVs, leaving us with 23927 ASVs total
+# we see that this removes ~23% of all ASVs, leaving us with 23877 ASVs total
 ps_noNAs
 ps_nochloro
 
@@ -269,7 +299,7 @@ ps_noNAs_prevfilt <- filter_taxa(ps_noNAs, function(x){sum(x > 0) > 1}, prune = 
 # next, we will remove ASVs whose total abundance (summed across all 54 samples) is less than 79 reads
 # 79 reads = 0.001% of taxa
 # we can find this number using:
-phyloseq_summary(ps_noNAs_prevfilt)[5,2] # 7,888,758 total reads
+phyloseq_summary(ps_noNAs_prevfilt)[5,2] # 7,882,708 total reads
 phyloseq_summary(ps_noNAs_prevfilt)[5,2]*.00001
 
 # abundance filtering step
@@ -279,20 +309,35 @@ ps_final <- prune_taxa(taxa_sums(ps_noNAs_prevfilt) >= 79, ps_noNAs_prevfilt)
 # we have lost 92% of ASVs by applying these 2 filtering steps!
 # but, we retained 97% of reads
 
-phyloseq_summary(ps_noNAs) # 8,026,706 reads
-ps_noNAs # 23,927 taxa
-phyloseq_summary(ps_noNAs_prevfilt) # 7,889,015 reads
-ps_noNAs_prevfilt # 5,134 taxa (21%)
-phyloseq_summary(ps_final) # 7,800,197 reads
-ps_final # 1,935 taxa (8%)
+phyloseq_summary(ps_noNAs) # 8,020,203 reads
+ps_noNAs # 23,877 taxa
+phyloseq_summary(ps_noNAs_prevfilt) # 7,882708 reads
+ps_noNAs_prevfilt # 5,122 taxa (21%)
+phyloseq_summary(ps_final) # 7,794,147 reads
+ps_final # 1,933 taxa (8%)
+
+# Exporting phyloseq data to a csv file for safekeeping -- ASV table
+OTU1 = as(otu_table(ps_final), "matrix")
+write.csv(as.data.frame(OTU1), file="ps_final_ASV_table_raw.csv")
+
+# Exporting phyloseq object data to a csv file for safekeeping -- taxa table
+taxa1 = as(tax_table(ps_final), "matrix")
+write.csv(as.data.frame(taxa1), file="ps_final_taxa_table_raw.csv")
+
+# Exporting phyloseq object data to a csv file for safekeeping -- refseq
+write.csv(as.data.frame(refseq(ps_final)), file="ps_final_refseq.csv")
 
 # let's find the minimum, maximum, and mean number of reads per sample in the final dataset
 ps_final_reads <- 1:54
 for (x in 1:54) {ps_final_reads[x] <- sum(otu_table(ps_final)[x,])}
-min(ps_final_reads) # 65,238
-max(ps_final_reads) # 254,196
-mean(ps_final_reads) # 144,449
+min(ps_final_reads) # 65,135
+max(ps_final_reads) # 254,106
+mean(ps_final_reads) # 144,336
 
+ps_adults_norm <- phyloseq::subset_samples(ps_norm, stage=="Adult" & diet=="H2O")
+ps_larvae_norm <- phyloseq::subset_samples(ps_norm, stage=="Larva" & diet=="H2O")
+names(sort(colSums(otu_table(ps_adults_norm)),TRUE)[1:14])
+names(sort(colSums(otu_table(ps_larvae_norm)),TRUE)[1:14])
 # note that the 3 major dietary groups have similar total # of reads (sampling depth)
 # same story for generation 3 samples vs. generation 4 samples
 # we will still normalize our data, because some experimental groups have uneven sampling depths
@@ -305,25 +350,8 @@ ps_DOX_final <- phyloseq::subset_samples(ps_final, diet=="DOX")
 sum(otu_table(ps_DOX_final))
 
 ps_larvae_final <- phyloseq::subset_samples(ps_final, stage=="Larva")
-ps_adults_final <- phyloseq::subset_samples(ps_final, stage=="Adult")
-
-ps_G3_final <- phyloseq::subset_samples(ps_final, generation=="G3")
-sum(otu_table(ps_G3_final))
-ps_G4_final <- phyloseq::subset_samples(ps_final, generation=="G4")
-sum(otu_table(ps_G4_final))
-
-ps_G4_ATC_larvae <- phyloseq::subset_samples(ps_final, group=="G4 ATC larvae")
-sum(otu_table(ps_G4_ATC_larvae))
-ps_G4_ATC_adults <- phyloseq::subset_samples(ps_final, group=="G4 ATC adults")
-sum(otu_table(ps_G4_ATC_adults))
-ps_G4_H2O_larvae <- phyloseq::subset_samples(ps_final, group=="G4 H2O larvae")
-sum(otu_table(ps_G4_H2O_larvae))
-ps_G4_H2O_adults <- phyloseq::subset_samples(ps_final, group=="G4 H2O adults")
-sum(otu_table(ps_G4_H2O_adults))
-ps_G4_DOX_larvae <- phyloseq::subset_samples(ps_final, group=="G4 DOX larvae")
-sum(otu_table(ps_G4_DOX_larvae))
-ps_G4_DOX_adults <- phyloseq::subset_samples(ps_final, group=="G4 DOX adults")
-sum(otu_table(ps_G4_DOX_adults))
+ps_adultM_final <- phyloseq::subset_samples(ps_final, stage=="Adult" & sex=="M")
+ps_adultF_final <- phyloseq::subset_samples(ps_final, stage=="Adult" & sex=="F")
 
 #### Core microbiome and shared/unique taxa ####
 
@@ -332,10 +360,10 @@ sum(otu_table(ps_G4_DOX_adults))
 # we will use SRS (scaling with ranked subsampling) to normalize our samples to even sample size (Cmin)
 # note that ASVs with count values of 1 *can* be converted to 0 values during downsampling; in other words, a presence can become an absence
 
-SRS.shiny.app(as.data.frame(t(otu_table(ps_final)))) #Cmin = 65,258 reads
+SRS.shiny.app(as.data.frame(t(otu_table(ps_final)))) #Cmin = 65,135 reads
 
 # make the normalized OTU table and put column names back
-normalized_otu_table <- t(SRS(as.data.frame(t(otu_table(ps_final))),65258))
+normalized_otu_table <- t(SRS(as.data.frame(t(otu_table(ps_final))),65135))
 colnames(normalized_otu_table) <- colnames(otu_table(ps_final))
 
 # make new phyloseq object with normalized ASV counts
@@ -349,7 +377,7 @@ ps_norm <- phyloseq(otu_table(normalized_otu_table, taxa_are_rows=FALSE), sample
 1-(sum(is.na(tax_table(ps_norm)[,2]))/1936) # 93% IDed to phylum
 
 # this code will tell us how many genera, families etc. are in our final dataset
-# 2 domains, 28 phyla, 63 classes, 137 orders, 190 families, 317 genera
+# 1 domain, 27 phyla, 62 classes, 136 orders, 189 families, 314 genera
 tax_table(ps_norm) %>%
   as("matrix") %>%
   as_tibble(rownames = "OTU") %>%
@@ -360,437 +388,138 @@ tax_table(ps_norm) %>%
   mutate(Rank = factor(Rank, rank_names(ps))) %>%
   arrange(Rank)
 
-#### Shared and unique taxa ####
+ps_G3_A <- phyloseq::subset_samples(ps_norm, generation=="G3" & stage=="Adult")
+ps_G4_A <- phyloseq::subset_samples(ps_norm, generation=="G4" & stage=="Adult")
+ps_G3_L <- phyloseq::subset_samples(ps_norm, generation=="G3" & stage=="Larva")
+ps_G4_L <- phyloseq::subset_samples(ps_norm, generation=="G4" & stage=="Larva")
+ps_G3_AM <- phyloseq::subset_samples(ps_norm, generation=="G3" & stage=="Adult" & sex=="M")
+ps_G4_AM <- phyloseq::subset_samples(ps_norm, generation=="G4" & stage=="Adult" & sex=="M")
+#----------------------------------------------------------------------
+# Euler plots to visualize shared and unique taxa
+#----------------------------------------------------------------------
+
+# code for generating Euler plots
+# fraction = 0
+G3L_euler <- ps_euler(ps_G3_L, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",lty=1,plot=TRUE)
+G3L_euler
+G3A_euler <- ps_euler(ps_G3_A, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = c(3,5), shape="ellipse",plot=TRUE)
+G3A_euler
+G4L_euler <- ps_euler(ps_G4_L, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",lty=1,plot=TRUE)
+G4L_euler
+G4A_euler <- ps_euler(ps_G4_A, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = c(3,5), shape="ellipse",plot=TRUE)
+G4A_euler
+G3Acomb_euler <- ps_euler(ps_G3_A, "group", fraction = 0.2, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"),lty = 1, shape="ellipse",plot=TRUE)
+G3Acomb_euler
+G4Acomb_euler <- ps_euler(ps_G4_A, "group", fraction = 0.2, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"),lty = 1, shape="ellipse",plot=TRUE)
+G4Acomb_euler
 
-# subset groups for comparisons
-ps_H2O <- phyloseq::subset_samples(ps_norm, diet=="H2O")
-ps_DOX <- phyloseq::subset_samples(ps_norm, diet=="DOX")
-ps_ATC <- phyloseq::subset_samples(ps_norm, diet=="ATC")
-ps_ATC_DOX <- phyloseq::subset_samples(ps_norm, diet!="H2O")
-ps_ATC_H2O <- phyloseq::subset_samples(ps_norm, diet!="DOX")
-ps_DOX_H2O <- phyloseq::subset_samples(ps_norm, diet!="ATC")
-ps_H2O_larvae <- phyloseq::subset_samples(ps_norm, stage=="Larva" & diet=="H2O")
-ps_H2O_adults <- phyloseq::subset_samples(ps_norm, stage=="Adult" & diet=="H2O")
-ps_larvae <- phyloseq::subset_samples(ps_norm, stage=="Larva")
-ps_adults <- phyloseq::subset_samples(ps_norm, stage=="Adult")
-ps_G3_ATC <- phyloseq::subset_samples(ps_norm, generation=="G3" & diet=="ATC")
-ps_G3_DOX <- phyloseq::subset_samples(ps_norm, generation=="G3" & diet=="DOX")
-ps_G4_ATC <- phyloseq::subset_samples(ps_norm, generation=="G4" & diet=="ATC")
-ps_G4_DOX <- phyloseq::subset_samples(ps_norm, generation=="G4" & diet=="DOX")
-ps_G3_H2O <- phyloseq::subset_samples(ps_norm, generation=="G3" & diet=="H2O")
-ps_G4_H2O <- phyloseq::subset_samples(ps_norm, generation=="G4" & diet=="H2O")
-ps_G3 <- phyloseq::subset_samples(ps_norm, generation=="G3")
-ps_G4 <- phyloseq::subset_samples(ps_norm, generation=="G4")
-ps_G3_larvae <- phyloseq::subset_samples(ps_norm, generation=="G3" & stage=="Larva")
-ps_G4_larvae <- phyloseq::subset_samples(ps_norm, generation=="G4" & stage=="Larva")
-ps_G3_adults <- phyloseq::subset_samples(ps_norm, generation=="G3" & stage=="Adult")
-ps_G4_adults <- phyloseq::subset_samples(ps_norm, generation=="G4" & stage=="Adult")
-ps_DOX_larvae <- phyloseq::subset_samples(ps_norm, diet=="DOX" & stage=="Larva")
-ps_ATC_larvae <- phyloseq::subset_samples(ps_norm, diet=="ATC" & stage=="Larva")
-ps_DOX_adults <- phyloseq::subset_samples(ps_norm, diet=="DOX" & stage=="Adult")
-ps_ATC_adults <- phyloseq::subset_samples(ps_norm, diet=="ATC" & stage=="Adult")
-ps_H2O_larvae <- phyloseq::subset_samples(ps_norm, diet=="H2O" & stage=="Larva")
-ps_H2O_adults <- phyloseq::subset_samples(ps_norm, diet=="H2O" & stage=="Adult")
-ps_G4_DOX_adults <- phyloseq::subset_samples(ps_norm, diet=="DOX" & stage=="Adult" & generation=="G4")
-ps_G4_H2O_adults <- phyloseq::subset_samples(ps_norm, diet=="H2O" & stage=="Adult" & generation=="G4")
-
-# taxa found in all H2O samples (N=70) -- this is the core microbiome of lab-reared flies
-shared_H2O_samples <- microbiome::core_members(ps_H2O, detection = 1, prevalence = 1, include.lowest = TRUE)
-tax_table(ps_norm)[shared_H2O_samples,]
-
-# taxa found in all 54 samples (N=11)
-shared_all_samples <- microbiome::core_members(ps_norm, detection = 1, prevalence = 1, include.lowest = TRUE)
-tax_table(ps_norm)[shared_all_samples,]
-
-
-otu_table(ps_H2O)[,1:20][, order(colSums(otu_table(ps_H2O)[,1:20]))]
-# proportion of Providencia in H2O samples (26%)
-sum(otu_table(ps_H2O)[,1])/sum(otu_table(ps_H2O)[,]) 
-
-# proportion of Morganella in H2O samples (10%)
-sum(otu_table(ps_H2O)[,2])/sum(otu_table(ps_H2O)[,]) 
-
-# proportion of Myroides in H2O samples (8%)
-sum(otu_table(ps_H2O)[,3])/sum(otu_table(ps_H2O)[,]) 
-
-# proportion of Acinetobacter in H2O samples (7%)
-sum(otu_table(ps_H2O)[,5])/sum(otu_table(ps_H2O)[,]) 
-
-# proportion of Staphylococcus in H2O samples (5%)
-sum(otu_table(ps_H2O)[,4])/sum(otu_table(ps_H2O)[,]) 
-
-# mean read count for Myroides: H2O G3 L: 14623
-(sum(otu_table(ps_norm)[c("ALK1","ALK2","ALK3"),3]))/3
-
-# mean read count for Myroides: ATC G3 L: 966
-(sum(otu_table(ps_norm)[c("ALK4","ALK5","ALK6"),3]))/3
-
-# mean read count for Myroides: DOX G3 L: 1735
-(sum(otu_table(ps_norm)[c("ALK7","ALK8","ALK9"),3]))/3
-
-# mean read count for Myroides: H2O G3 A:800
-(sum(otu_table(ps_norm)[c("ALK10","ALK11","ALK12","ALK13","ALK14","ALK15"),3]))/6
-
-# mean read count for Myroides: ATC G3 A: 677
-(sum(otu_table(ps_norm)[c("ALK16","ALK17","ALK18","ALK19","ALK20","ALK21"),3]))/6
-
-# mean read count for Myroides: DOX G3 A: 1380
-(sum(otu_table(ps_norm)[c("ALK22","ALK23","ALK24","ALK25","ALK26","ALK27"),3]))/6
-
-# mean read count for Myroides: H2O G4 L: 14586
-(sum(otu_table(ps_norm)[c("ALK28","ALK29","ALK30"),3]))/3
-
-# mean read count for Myroides: ATC G4 L: 33354
-(sum(otu_table(ps_norm)[c("ALK31","ALK32","ALK33"),3]))/3
-
-# mean read count for Myroides: DOX G4 L: 16139
-(sum(otu_table(ps_norm)[c("ALK34","ALK35","ALK36"),3]))/3
-
-# mean read count for Myroides: H2O G4 A: 235
-(sum(otu_table(ps_norm)[c("ALK37","ALK38","ALK39","ALK40","ALK41","ALK42"),3]))/6
-
-# mean read count for Myroides: ATC G4 A: 230
-(sum(otu_table(ps_norm)[c("ALK43","ALK44","ALK45","ALK46","ALK47","ALK48"),3]))/6
-
-# mean read count for Myroides: DOX G4 A: 2
-(sum(otu_table(ps_norm)[c("ALK49","ALK50","ALK51","ALK52","ALK53","ALK54"),3]))/6
-
-# taxa found in other samples
-shared_G3_larvae <- microbiome::core_members(ps_G3_larvae, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_G4_larvae <- microbiome::core_members(ps_G4_larvae, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_G3_adults <- microbiome::core_members(ps_G3_adults, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_G4_adults <- microbiome::core_members(ps_G4_adults, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_DOX_larvae <- microbiome::core_members(ps_DOX_larvae, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_ATC_larvae <- microbiome::core_members(ps_ATC_larvae, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_DOX_adults <- microbiome::core_members(ps_DOX_adults, detection = 1, prevalence = 1, include.lowest = TRUE)
-shared_ATC_adults <- microbiome::core_members(ps_ATC_adults, detection = 1, prevalence = 1, include.lowest = TRUE)
-
-# lists the unique taxa in each experimental group
-# G4 DOX adults have 63 taxa that are completely unique to this group
-# all other groups have just 0, 1 or 2 unique taxa
-unique_groups <- unique_taxa(ps_norm, treatment = "group")
-unique_groups
-tax_table(ps_norm)[unique_groups$`G4 DOX adults`,]
-# let's see the breakdown of these unique groups at different taxonomic levels
-sort(table(tax_table(ps_norm)[unique_groups$`G4 DOX adults`,4]),TRUE)
-sort(table(tax_table(ps_norm)[unique_groups$`G4 DOX adults`,5]),TRUE)
-sort(table(tax_table(ps_norm)[unique_groups$`G4 DOX adults`,6]),TRUE)
-sort(table(tax_table(ps_adults)[,5]),TRUE)
-
-# there are 42 families represented among the 63 unique G4 DOX ASVs; the most common families are Comamonadaceae (12%) and Burkholderiaceae (10%)
-# compare to 190 families across all adult samples, 26 (2%) and 14 (1%) of ASVs mapped back to these 2 families
-# antibiotic resistance??
-# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8562478/
-# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8092502/#:~:text=Although%20Burkholderia%20species%20contain%20a,defend%20against%20high%20tetracycline%20concentrations
-# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9504711/
-# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7229144/
-
-#### let's look for male or female-exclusive taxa ####
-
-unique_sex <- unique_taxa(ps_adults, treatment = "sex")
-unique_sex
-length(unique_sex$M) # 51 taxa found in some male but no female samples
-length(unique_sex$F) # 20 taxa found in some female but no male samples
-tax_table(ps_norm)[unique_sex$`M`,]
-otu_table(ps_adults)[,unique_sex$`M`]
-tax_table(ps_norm)[unique_sex$`F`,]
-otu_table(ps_adults)[,unique_sex$`F`]
-unique_Fs <- as.data.frame(otu_table(ps_adults)[,unique_sex$`F`])
-unique_Ms <- as.data.frame(otu_table(ps_adults)[,unique_sex$`M`])
-unique_Fs <- cbind(unique_Fs,sample_data(ps_adults)$group)
-unique_Ms <- cbind(unique_Ms,sample_data(ps_adults)$group)
-write.csv(unique_Fs,"Female_exclusive_taxa.csv")
-write.csv(unique_Ms,"Male_exclusive_taxa.csv")
-
-# of the male and female-exclusive taxa, let's see how many samples they appear in
-colSums(unique_Fs[,1:20] > 0)
-colSums(unique_Ms[,1:51] > 0)
-
-# unique taxa among G3 adults
-unique_G3_adults <- unique_taxa(ps_norm, treatment = "group", subset = c("G3 H2O adults","G3 DOX adults","G3 ATC adults"))
-
-# unique taxa among G4 adults
-unique_G4_adults <- unique_taxa(ps_norm, treatment = "group", subset = c("G4 H2O adults","G4 DOX adults","G4 ATC adults"))
-
-# unique taxa, G3 DOX vs. ATC adults
-unique_G3_DOXvATC_adults <- unique_taxa(ps_norm, treatment = "group", subset = c("G3 ATC adults","G3 DOX adults"))
-
-# unique taxa, G3 DOX adults vs. G4 DOX adults
-unique_G3vG4_DOX_adults <- unique_taxa(ps_norm, treatment = "group", subset = c("G3 DOX adults","G4 DOX adults"))
-
-# unique taxa, G3 ATC adults vs. G4 ATC adults
-unique_G3vG4_ATC_adults <- unique_taxa(ps_norm, treatment = "group", subset = c("G3 ATC adults","G4 ATC adults"))
-
-
-#### Core taxa ####
-
-# generate list of core taxa in different dietary groups
-# note that fraction = 1; this means a taxon will only be counted if found in ALL samples belonging to a given group
-# so this is very strict
-core_lists <- ps_euler(ps_norm, "diet", labels = list(cex = 0), fraction = 1, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Larvae", shape="ellipse", plot=FALSE)
-
-
-core_lists_MvF_H2O <- ps_euler(ps_H2O_adults, "sex", labels = list(cex = 0), fraction = 1, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Larvae", shape="ellipse", plot=FALSE)
-
-# prep for making heat maps
-# make lists of taxa
-shared_H2O_samples # taxa found in all H2O-reared samples (N=70)
-core_lists$ATC__DOX__H2O # taxa found in all DOX, H2O and ATC samples (N=11)
-core_lists$ATC__H2O # taxa found in all ATC and H2O samples (absent at least in some cases from DOX) (N=3)
-core_lists$DOX__H2O # taxa found in all DOX and H2O samples (absent at least in some cases from ATC) (N=4)
-
-# make otu and tax table objects
-core_otu_table_H2O <- subset(t(otu_table(ps_norm)), colnames(otu_table(ps_norm)) %in% shared_H2O_samples)
-core_tax_table_H2O <- subset(tax_table(ps_norm), rownames(tax_table(ps_norm)) %in% shared_H2O_samples)
-
-# define new phyloseq object
-ps_core_H2O <- phyloseq(otu_table=core_otu_table_H2O,tax_table=core_tax_table_H2O,sample_data(sample_data),taxa_are_rows=TRUE)
-
-# feed this data into metacoder
-ps_metacoder_core_H2O <- parse_phyloseq(ps_core_H2O)
-
-# sum taxa abundance by diet
-ps_metacoder_core_H2O$data$tax_abund <- calc_taxon_abund(ps_metacoder_core_H2O, "otu_table", cols = ps_metacoder_core_H2O$data$sample_data$sample_id, groups = ps_metacoder_core_H2O$data$sample_data$diet)
-ps_metacoder_core_H2O$data$tax_abund
-
-# plot a heat map of only the H2O group sums, with blue color coding
-set.seed(7)
-ps_metacoder_core_H2O %>% heat_tree(node_size = H2O, node_color = H2O, node_label = taxon_names, initial_layout = "re", layout = "da", node_color_range = c("cadetblue", "cyan2", "yellow", "lightcoral"),node_color_trans="linear", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02))
-
-# next, let's plot the core taxa found in DOX and ATC groups
-# we'll gray out the other taxa on the heat map
-# let's plot ATC taxa first
-
-antibiotic_otu_table <- core_otu_table_H2O
-antibiotic_otu_table[core_lists$H2O,] = 0
-antibiotic_otu_table[core_lists$ATC__DOX__H2O,] = 1
-antibiotic_otu_table[core_lists$ATC__H2O,] = 1
-antibiotic_otu_table[core_lists$DOX__H2O,] = 0
-antibiotic_otu_table
-
-ps_core_antibiotic <- phyloseq(otu_table=antibiotic_otu_table,tax_table=core_tax_table_H2O,sample_data(sample_data),taxa_are_rows=TRUE)
-ps_metacoder_core_antibiotic <- parse_phyloseq(ps_core_antibiotic)
-
-ps_metacoder_core_antibiotic$data$tax_abund <- calc_taxon_abund(ps_metacoder_core_antibiotic, "otu_table", cols = ps_metacoder_core_antibiotic$data$sample_data$sample_id, groups = ps_metacoder_core_antibiotic$data$sample_data$diet)
-ps_metacoder_core_antibiotic$data$tax_abund
-
-# plot with labels for all 70 taxa
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = ATC, node_color = ATC, node_label = taxon_names, initial_layout = "re", layout = "da", node_color_range = c("gray90","#69EA69","#69EA69","#69EA69","#69EA69","#69EA69","#69EA69"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-# plot with labels only for taxa that are present
-codes <- ps_metacoder_core_antibiotic$data$tax_abund$taxon_id
-counts <- as.vector(unlist(as.vector(ps_metacoder_core_antibiotic$data$tax_abund[,2])))
-codes[counts==0] <- NA
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = ATC, node_color = ATC, node_label = c(taxon_names(ps_metacoder_core_antibiotic)[codes]), initial_layout = "re", layout = "da", node_color_range = c("gray90","#69EA69","#69EA69","#69EA69","#69EA69","#69EA69","#69EA69"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-# plot with no labels
-codes[] <- NA
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = ATC, node_color = ATC, node_label = c(taxon_names(ps_metacoder_core_antibiotic)[codes]), initial_layout = "re", layout = "da", node_color_range = c("gray90","#11eb81","#11eb81","#11eb81","#11eb81","#11eb81","#11eb81"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-
-# now let's plot the DOX taxa heat map
-
-antibiotic_otu_table <- core_otu_table_H2O
-antibiotic_otu_table[core_lists$H2O,] = 0
-antibiotic_otu_table[core_lists$ATC__DOX__H2O,] = 1
-antibiotic_otu_table[core_lists$ATC__H2O,] = 0
-antibiotic_otu_table[core_lists$DOX__H2O,] = 1
-antibiotic_otu_table
-
-ps_core_antibiotic <- phyloseq(otu_table=antibiotic_otu_table,tax_table=core_tax_table_H2O,sample_data(sample_data),taxa_are_rows=TRUE)
-ps_metacoder_core_antibiotic <- parse_phyloseq(ps_core_antibiotic)
-
-ps_metacoder_core_antibiotic$data$tax_abund <- calc_taxon_abund(ps_metacoder_core_antibiotic, "otu_table", cols = ps_metacoder_core_antibiotic$data$sample_data$sample_id, groups = ps_metacoder_core_antibiotic$data$sample_data$diet)
-ps_metacoder_core_antibiotic$data$tax_abund
-
-# plot with labels for all 70 taxa
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = DOX, node_color = DOX, node_label = taxon_names, initial_layout = "re", layout = "da", node_color_range = c("gray90", "#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-# plot with labels only for taxa that are present
-codes <- ps_metacoder_core_antibiotic$data$tax_abund$taxon_id
-counts <- as.vector(unlist(as.vector(ps_metacoder_core_antibiotic$data$tax_abund[,2])))
-codes[counts==0] <- NA
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = DOX, node_color = DOX, node_label = c(taxon_names(ps_metacoder_core_antibiotic)[codes]), initial_layout = "re", layout = "da", node_color_range = c("gray90", "#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-# plot with no labels
-codes[] <- NA
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = DOX, node_color = DOX, node_label = c(taxon_names(ps_metacoder_core_antibiotic)[codes]), initial_layout = "re", layout = "da", node_color_range = c("gray90", "#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF","#FFA2FF"), node_label_color = "black", node_color_trans="area", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-
-# plot heat tree that combines the ATC and DOX data
-
-antibiotic_otu_table <- core_otu_table_H2O
-antibiotic_otu_table[core_lists$H2O,] = 0
-antibiotic_otu_table[core_lists$ATC__DOX__H2O,] = 3
-antibiotic_otu_table[core_lists$ATC__H2O,] = 1
-antibiotic_otu_table[core_lists$DOX__H2O,] = 2
-antibiotic_otu_table
-
-ps_core_antibiotic <- phyloseq(otu_table=antibiotic_otu_table,tax_table=core_tax_table_H2O,sample_data(sample_data),taxa_are_rows=TRUE)
-ps_metacoder_core_antibiotic <- parse_phyloseq(ps_core_antibiotic)
-
-ps_metacoder_core_antibiotic$data$tax_abund <- calc_taxon_abund(ps_metacoder_core_antibiotic, "otu_table", cols = ps_metacoder_core_antibiotic$data$sample_data$sample_id, groups = ps_metacoder_core_antibiotic$data$sample_data$diet)
-ps_metacoder_core_antibiotic$data$tax_abund
-
-codes <- ps_metacoder_core_antibiotic$data$tax_abund$taxon_id
-counts <- as.vector(unlist(as.vector(ps_metacoder_core_antibiotic$data$tax_abund[,2])))
-codes[] <- NA
-
-ps_metacoder_core_antibiotic$data$tax_abund$DOX[ps_metacoder_core_antibiotic$data$tax_abund$DOX==18] <- 1
-ps_metacoder_core_antibiotic$data$tax_abund$DOX[ps_metacoder_core_antibiotic$data$tax_abund$DOX==36] <- 2
-ps_metacoder_core_antibiotic$data$tax_abund$DOX[ps_metacoder_core_antibiotic$data$tax_abund$DOX>36] <- 3
-ps_metacoder_core_antibiotic$data$tax_abund$DOX[82] <- 2
-set.seed(7)
-ps_metacoder_core_antibiotic %>% heat_tree(node_size = DOX, node_color = DOX, node_label = c(taxon_names(ps_metacoder_core_antibiotic)[codes]), initial_layout = "re", layout = "da", node_color_range = c("gray90","#11eb81","#FFA2FF","#88A28F"), node_label_color = "black", node_color_trans="linear", node_label_size_range=c(0.01,0.015),node_size_range=c(0.02,0.02),background_color="white")
-
-
-### Get names of taxa found only in certain groups
-
-tax_table(ps_norm)[core_lists$ATC__DOX__H2O,]
-tax_table(ps_norm)[core_lists$ATC__H2O,]
-tax_table(ps_norm)[core_lists$DOX__H2O,]
-
-### Euler plots ###
-
-# change the "plot" parameter from FALSE to TRUE to display the venn diagram
-# change to FALSE to get taxa lists
-
-# by diet, with labels
-p1 <- ps_euler(ps_G3_larvae, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Larvae", shape="ellipse",plot=FALSE)
-p2<- ps_euler(ps_G3_adults, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Adults", shape="ellipse",plot=FALSE)
-p3 <- ps_euler(ps_G4_larvae, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G4 Larvae", shape="ellipse",plot=FALSE)
-p4 <- ps_euler(ps_G4_adults, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G4 Adults", shape="ellipse",plot=FALSE)
-
-# by diet, without labels
-euler_G3_larvae_bydiet <- ps_euler(ps_G3_larvae, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Larvae", shape="ellipse")
-euler_G3_adults_bydiet <- ps_euler(ps_G3_adults, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G3 Adults", shape="ellipse")
-euler_G4_larvae_bydiet <- ps_euler(ps_G4_larvae, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G4 Larvae", shape="ellipse")
-euler_G4_adults_bydiet <- ps_euler(ps_G4_adults, "diet", fraction = 0.5, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), main = "G4 Adults", shape="ellipse")
-
-# by life stage, with labels
-p5 <- ps_euler(ps_G3_H2O, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G3 H2O", shape="ellipse",plot=FALSE)
-p6 <- ps_euler(ps_G3_ATC, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G3 ATC", shape="ellipse",plot=FALSE)
-p7 <- ps_euler(ps_G3_DOX, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G3 DOX", shape="ellipse",plot=FALSE)
-p8 <- ps_euler(ps_G4_H2O, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G4 H2O", shape="ellipse",plot=FALSE)
-p9 <- ps_euler(ps_G4_ATC, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G4 ATC", shape="ellipse",plot=FALSE)
-p10 <- ps_euler(ps_G4_DOX, "stage", labels = list(cex = 0), fraction = 0.5, quantities = list(type=c("percent","counts"), font = 2, cex = 1), col = "black", fill = c("gray86","wheat1"), main = "G4 DOX", shape="ellipse",plot=FALSE)
-
-# by life stage, without labels
-euler_G3_H2O_bystage <- ps_euler(ps_G3_H2O, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G3 H2O", shape="ellipse")
-euler_G3_ATC_bystage <- ps_euler(ps_G3_ATC, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G3 ATC", shape="ellipse")
-euler_G3_DOX_bystage <- ps_euler(ps_G3_DOX, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G3 DOX", shape="ellipse")
-euler_G4_H2O_bystage <- ps_euler(ps_G4_H2O, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G4 H2O", shape="ellipse")
-euler_G4_ATC_bystage <- ps_euler(ps_G4_ATC, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G4 ATC", shape="ellipse")
-euler_G4_DOX_bystage <- ps_euler(ps_G4_DOX, "stage", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("gray86","wheat1"), main = "G4 DOX", shape="ellipse")
-
-# by generation, with labels
-p11 <- ps_euler(ps_DOX_larvae, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "DOX larvae", shape="ellipse",plot=FALSE)
-p12 <- ps_euler(ps_DOX_adults, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "DOX adults", shape="ellipse",plot=FALSE)
-p13 <- ps_euler(ps_ATC_larvae, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "ATC larvae", shape="ellipse",plot=FALSE)
-p14 <- ps_euler(ps_ATC_adults, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1),  fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "ATC adults", shape="ellipse",plot=FALSE)
-p15 <- ps_euler(ps_H2O_larvae, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "H2O larvae", shape="ellipse",plot=FALSE)
-p16 <- ps_euler(ps_H2O_adults, "generation", labels = list(cex = 0), quantities = list(type=c("percent","counts"), font = 2, cex = 1), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "H2O adults", shape="ellipse",plot=FALSE)
-
-# by generation, without labels
-euler_DOX_larvae_bygen <- ps_euler(ps_DOX_larvae, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "DOX larvae", shape="ellipse")
-euler_DOX_adults_bygen <- ps_euler(ps_DOX_adults, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "DOX adults", shape="ellipse")
-euler_ATC_larvae_bygen <- ps_euler(ps_ATC_larvae, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "ATC larvae", shape="ellipse")
-euler_ATC_adults_bygen <- ps_euler(ps_ATC_adults, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "ATC adults", shape="ellipse")
-euler_H2O_larvae_bygen <- ps_euler(ps_H2O_larvae, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "H2O larvae", shape="ellipse")
-euler_H2O_adults_bygen <- ps_euler(ps_H2O_adults, "generation", labels = list(cex = 0), fraction = 0.5, col = "black", fill = c("#FFAB91","#9FA8DA"), main = "H2O adults", shape="ellipse")
 
 ### code for scaling Euler plots
 # first, make vectors of the sums of ASVs in each Euler plot
 # then, get scaling factor by taking the square root
 
-# by diet
-sums_bydiet <- c(sum(lengths(p1)),sum(lengths(p2)),sum(lengths(p3)),sum(lengths(p4)))
-sqrt(sums_bydiet/sums_bydiet[1])
+list_G3L_euler <- ps_euler(ps_G3_L, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",plot=FALSE)
+list_G3A_euler <- ps_euler(ps_G3_A, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = 1:2, shape="ellipse",plot=FALSE)
+list_G4L_euler <- ps_euler(ps_G4_L, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",plot=FALSE)
+list_G4A_euler <- ps_euler(ps_G4_A, "fullgroup", fraction = 0, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = 1:2, shape="ellipse",plot=FALSE)
+list_G3Acomb_euler <- ps_euler(ps_G3_A, "group", fraction = 0.2, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",plot=FALSE)
+list_G4Acomb_euler <- ps_euler(ps_G4_A, "group", fraction = 0.2, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1"), shape="ellipse",plot=FALSE)
 
-# by life stage
-sums_bystage <- c(sum(lengths(p5)),sum(lengths(p6)),sum(lengths(p7)),sum(lengths(p8)),sum(lengths(p9)),sum(lengths(p10)))
-sqrt(sums_bystage/sums_bystage[1])
+list_G3AM_euler <- ps_euler(ps_G3_AM, "fullgroup", fraction = 1, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = 1:2, shape="ellipse",plot=FALSE)
+list_G4AM_euler <- ps_euler(ps_G4_AM, "fullgroup", fraction = 1, labels = list(cex = 0), col = "black", fill = c("darkseagreen2", "thistle1", "lightskyblue1","darkseagreen2", "thistle1", "lightskyblue1"),lty = 1:2, shape="ellipse",plot=FALSE)
 
-# by generation
-sums_bygen <- c(sum(lengths(p11)),sum(lengths(p12)),sum(lengths(p13)),sum(lengths(p14)),sum(lengths(p15)),sum(lengths(p16)))
-sqrt(sums_bygen/sums_bygen[1])
+
+sums_for_scaling <- c(sum(lengths(list_G3L_euler)),sum(lengths(list_G3A_euler)),sum(lengths(list_G4L_euler)),sum(lengths(list_G4A_euler)),sum(lengths(list_G3Acomb_euler)),sum(lengths(list_G4Acomb_euler)))
+scaling_factor <- sqrt(sums_for_scaling/sums_for_scaling[1])
 
 # make the scaled plots
-gridExtra::grid.arrange(euler_G3_larvae_bydiet, euler_G3_adults_bydiet, euler_G4_larvae_bydiet, euler_G4_adults_bydiet, widths=sqrt(sums_bydiet/sums_bydiet[1]))
-gridExtra::grid.arrange(euler_G3_H2O_bystage, euler_G3_ATC_bystage, euler_G3_DOX_bystage, euler_G4_H2O_bystage, euler_G4_ATC_bystage, euler_G4_DOX_bystage, widths=sqrt(sums_bystage/sums_bystage[1]))
-gridExtra::grid.arrange(euler_DOX_larvae_bygen, euler_DOX_adults_bygen, euler_ATC_larvae_bygen, euler_ATC_adults_bygen, euler_H2O_larvae_bygen, euler_H2O_adults_bygen, widths=sqrt(sums_bygen/sums_bygen[1]))
+gridExtra::grid.arrange(G3L_euler, G3A_euler, G4L_euler, G4A_euler,G3Acomb_euler,G4Acomb_euler, widths=scaling_factor)
 
-#### Alpha Diversity ####
+# get info for labeling the Euler plots
+lengths(list_G3L_euler)
+sum(lengths(list_G3L_euler))
+lengths(list_G3L_euler)/sum(lengths(list_G3L_euler))
+
+lengths(list_G4L_euler)
+sum(lengths(list_G4L_euler))
+lengths(list_G4L_euler)/sum(lengths(list_G4L_euler))
+
+lengths(list_G3Acomb_euler)
+sum(lengths(list_G3Acomb_euler))
+lengths(list_G3Acomb_euler)/sum(lengths(list_G3Acomb_euler))
+
+lengths(list_G4Acomb_euler)
+sum(lengths(list_G4Acomb_euler))
+lengths(list_G4Acomb_euler)/sum(lengths(list_G4Acomb_euler))
+
+#----------------------------------------------------------------------
+# Alpha diversity
+#----------------------------------------------------------------------
 
 ### get Faith PD, Pielou Evenness and Shannon Index values into dataframe with sample info for plotting
 
 # we will calculate Faith PD, so we need a phylogenetic tree, which we will make with the 'ape' package
 # create the tree with "rtree", and use set.seed() to ensure reproducibility
+
 set.seed(2)
 random_tree = rtree(ntaxa(ps_norm), rooted=TRUE, tip.label=taxa_names(ps_norm))
 
 # make "alpha" data frame with sample info and Shannon index data
 alpha <- plot_richness(ps_norm,x="group",measures="Shannon",color="group")$data
 
-# remove unnecessary colums
-alpha <- alpha[,c(1:7,9)]
-
 # rename the "value" columns to ShIndex
-colnames(alpha)[8] <- "ShIndex"
+colnames(alpha)[10] <- "ShIndex"
 
 # add a column for the Faith PD values
-alpha[,9] <- as.vector(pd(samp = otu_table(ps_norm), tree = random_tree)[1])
+alpha[,12] <- as.vector(pd(samp = otu_table(ps_norm), tree = random_tree)[1])
 
 # add a column for the Pielou evenness values
-alpha[,10] <- evenness(ps_norm, index = "all", zeroes = TRUE, detection = 0)[,2]
+alpha[,13] <- evenness(ps_norm, index = "all", zeroes = TRUE, detection = 0)[,2]
 
 # rename the column
-colnames(alpha)[10] <- "Evenness"
+colnames(alpha)[13] <- "Evenness"
 
 #### Hypothesis testing (Shannon Index) ####
 
 # global test for differences among any experimental group
-kruskal.test(alpha[,8] ~ alpha$group, data = alpha)
+kruskal.test(alpha[,10] ~ alpha$group, data = alpha)
+
 # pairwise tests with Benjamini-Hochberg correction for multiple comparisons
-Shannon_pairwise <- pairwise.wilcox.test(alpha[,8], alpha$group ,p.adjust.method = "BH")
+Shannon_pairwise <- pairwise.wilcox.test(alpha[,10], alpha$group ,p.adjust.method = "BH")
+
 # p-value matrix
 Shannon_pairwise$p.value
+
 # we can export the p-value matrix to a .csv file
 write.csv(Shannon_pairwise$p.value,"Shannon_pvals_pairs.csv")
 # p-values < 0.05
 Shannon_pairwise$p.value <0.05
-# p-values < 0.1
-Shannon_pairwise$p.value <0.1
 
 #### Hypothesis testing (Faith PD) ####
 
 # global test
-kruskal.test(alpha[,9] ~ alpha$group, data = alpha)
+kruskal.test(alpha[,12] ~ alpha$group, data = alpha)
 # pairwise tests with Benjamini-Hochberg correction for multiple comparisons
-PD_pairwise <- pairwise.wilcox.test(alpha[,9], alpha$group ,p.adjust.method = "BH")
+PD_pairwise <- pairwise.wilcox.test(alpha[,12], alpha$group ,p.adjust.method = "BH")
 # p-value matrix
 PD_pairwise$p.value
 # we can export the p-value matrix to a .csv file
 write.csv(PD_pairwise$p.value,"PD_pvals_pairs.csv")
 # p-values < 0.05
 PD_pairwise$p.value <0.05
-# p-values < 0.1
-PD_pairwise$p.value <0.1
 
 ##### Hypothesis testing (Evenness) ####
 
 # global test
-kruskal.test(alpha[,10] ~ alpha$group, data = alpha)
+kruskal.test(alpha[,13] ~ alpha$group, data = alpha)
 # pairwise tests with Benjamini-Hochberg correction for multiple comparisons
-Evenness_pairwise <- pairwise.wilcox.test(alpha[,10], alpha$group ,p.adjust.method = "BH")
+Evenness_pairwise <- pairwise.wilcox.test(alpha[,13], alpha$group ,p.adjust.method = "BH")
 # p-value matrix
 Evenness_pairwise$p.value
 # we can export the p-value matrix to a .csv file
 write.csv(Evenness_pairwise$p.value,"Evenness_pvals_pairs.csv")
 # p-values < 0.05
 Evenness_pairwise$p.value <0.05
-# p-values < 0.1
-Evenness_pairwise$p.value <0.1
 
 #### Alpha diversity plots ####
 
@@ -823,23 +552,23 @@ PD_pairwise_df.sym <- Matrix::forceSymmetric(as.matrix(PD_pairwise_df),uplo="L")
 Evenness_pairwise_df.sym <- Matrix::forceSymmetric(as.matrix(Evenness_pairwise_df),uplo="L")
 
 # add new columns to the alpha data
-alpha[,11:16] <- c(NA,NA,NA)
+alpha[,14:16] <- c(NA,NA,NA)
 
 # get letters denoting significantly different groups (p<0.05)
 letters <- multcompLetters(Shannon_pairwise_df.sym)
-for (x in 1:54) { alpha[x, 11] <- letters$Letters[[alpha$group[x]]]}
+for (x in 1:54) { alpha[x, 14] <- letters$Letters[[alpha$group[x]]]}
 letters <- multcompLetters(PD_pairwise_df.sym)
-for (x in 1:54) { alpha[x, 12] <- letters$Letters[[alpha$group[x]]]}
+for (x in 1:54) { alpha[x, 15] <- letters$Letters[[alpha$group[x]]]}
 letters <- multcompLetters(Evenness_pairwise_df.sym)
-for (x in 1:54) { alpha[x, 13] <- letters$Letters[[alpha$group[x]]]}
+for (x in 1:54) { alpha[x, 16] <- letters$Letters[[alpha$group[x]]]}
 
 # make new columns in alpha with max values -- this will help us plot the letters above data points on the graph
-for (x in 1:54) { alpha[x, 14] <- max(alpha[alpha$group == alpha$group[x],8])}
-for (x in 1:54) { alpha[x, 15] <- max(alpha[alpha$group == alpha$group[x],9])}
-for (x in 1:54) { alpha[x, 16] <- max(alpha[alpha$group == alpha$group[x],10])}
+for (x in 1:54) { alpha[x, 17] <- max(alpha[alpha$group == alpha$group[x],10])}
+for (x in 1:54) { alpha[x, 18] <- max(alpha[alpha$group == alpha$group[x],12])}
+for (x in 1:54) { alpha[x, 19] <- max(alpha[alpha$group == alpha$group[x],13])}
 
 # rename columns for easier plotting
-colnames(alpha)[11:16] <- c("letters_ShIndex","letters_PD","letters_Evenness","maxes_ShIndex","maxes_PD","maxes_Evenness") 
+colnames(alpha)[14:19] <- c("letters_ShIndex","letters_PD","letters_Evenness","maxes_ShIndex","maxes_PD","maxes_Evenness") 
 
 # rename the stages from singular to plural
 levels(alpha$stage) <- c("Adults","Larvae")
@@ -849,18 +578,51 @@ levels(alpha$stage) <- c("Adults","Larvae")
 strip <- strip_themed(background_x = elem_list_rect(fill = c("#FFE7BA","#DBDBDB")))
 
 # Shannon Index plot (article version)
-Sh_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), ShIndex, group=generation, color=generation)) + scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_rect(colour = "black"),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=20), legend.text = element_text(size=10)) + scale_y_continuous(limits = c(0, 7)) + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + xlab("G1-G3 Diet") + ylab("Shannon Index") + geom_text(aes(label = str_trim(letters_ShIndex), y = rep(6,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
-# Shannon Index plot (standalone version)
-Sh_plot_standalone <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), ShIndex, group=generation, color=generation)) + scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_rect(colour = "black"),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=15), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=20), legend.text = element_text(size=10)) + scale_y_continuous(limits = c(0, 7)) + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + xlab("G1-G3 Diet") + ylab("Shannon Index") + geom_text(aes(label = str_trim(letters_ShIndex), y = maxes_ShIndex+0.4), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
+Sh_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), ShIndex, group=generation, color=group)) + 
+scale_color_manual(values = c("#35C47D","#35C47D","#CD96CD","#CD96CD","#5CACEE","#5CACEE","#199151","#199151","#8B668B","#8B668B","#1874CD","#1874CD")) + 
+geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + 
+theme(strip.background = element_rect(colour = "black"),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=14), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=20), legend.text = element_text(size=10)) + 
+scale_y_continuous(limits = c(0, 7)) + 
+stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + 
+stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) +
+xlab("G1-G3 Diet") + 
+ylab("Shannon Index") + 
+geom_text(aes(label = str_trim(letters_ShIndex), y = rep(6.4,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + 
+theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + 
+facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
+
+Sh_plot_final
 
 # Faith PD plot
-PD_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), PD, group=generation, color=generation)) + scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_blank(), legend.text = element_text(size=10)) + scale_y_continuous(limits = c(0, 2000)) + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + xlab("G1-G3 Diet") + ylab("Faith PD") + geom_text(aes(label = str_trim(letters_PD), y = rep(1900,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"))
+PD_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), PD, group=generation, color=group)) + 
+  scale_color_manual(values = c("#35C47D","#35C47D","#CD96CD","#CD96CD","#5CACEE","#5CACEE","#199151","#199151","#8B668B","#8B668B","#1874CD","#1874CD")) + 
+  geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + 
+  theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=14), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_blank(), legend.text = element_text(size=10)) + 
+  scale_y_continuous(limits = c(0, 2000)) + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) +
+  xlab("G1-G3 Diet") + 
+  ylab("Faith PD") + 
+  geom_text(aes(label = str_trim(letters_PD), y = rep(1900,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + 
+  theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + 
+  facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"))
+PD_plot_final
 
 # Evenness plot
-Evenness_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), Evenness, group=generation, color=generation)) + scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_blank(), legend.text = element_text(size=10)) + scale_y_continuous(limits = c(0, 1)) + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + xlab("G1-G3 Diet") + ylab("Evenness") + geom_text(aes(label = str_trim(letters_Evenness), y = rep(0.9,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank()) + facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
-
+Evenness_plot_final <- ggplot(alpha, aes(forcats::fct_relevel(diet, "DOX", "ATC", "H2O"), Evenness, group=generation, color=group)) + 
+  scale_color_manual(values = c("#35C47D","#35C47D","#CD96CD","#CD96CD","#5CACEE","#5CACEE","#199151","#199151","#8B668B","#8B668B","#1874CD","#1874CD")) + 
+  geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + 
+  theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=14), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_blank(), legend.text = element_text(size=10)) + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) +
+  xlab("G1-G3 Diet") + ylab("Evenness") + 
+  geom_text(aes(label = str_trim(letters_Evenness), y = rep(0.93,54)), vjust = -0.5, position=position_dodge(width=0.7),size=4,color="black") + 
+  theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank()) + 
+  facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
+Evenness_plot_final
 # Arrange alpha diversity plots in a vertical stack
-# export as PDF: portrait mode, 16"x9"
+# export as PDF: portrait mode, 15"x8"
 alpha_div_vertical <- plot_grid(Sh_plot_final, PD_plot_final, Evenness_plot_final, ncol=1, align="v")
 alpha_div_vertical
 
@@ -894,7 +656,7 @@ phyloseq2qiime2<-function(physeq){
   }
   #write sample data (metadata) to tsv
   if(is.null(access(physeq,"sam_data"))==FALSE){
-    write.table(sample_data(physeq),file=paste0(ps_name,"_sample-metadata.txt"), 
+    write.table(data.frame(sample_data(physeq)),file=paste0(ps_name,"_sample-metadata.txt"), 
                 sep="\t", row.names=FALSE, col.names=TRUE, quote=FALSE)
     print(paste0("Writing sample metadata to ",ps_name,"_sample-metadata.txt"))
   }
@@ -932,13 +694,26 @@ phyloseq2qiime2<-function(physeq){
 }
 
 # add new "id" column to the sample metadata prior to exporting the metadata as .txt file
-sample_data(ps_final) <- cbind(rownames(sample_data(ps_final)),sample_data(ps_final))
-colnames(sample_data(ps_final))[1] <- "id"
+
+ps_final <- prune_taxa(taxa_sums(ps_noNAs_prevfilt) >= 79, ps_noNAs_prevfilt)
+ps_larvae_final <- phyloseq::subset_samples(ps_final, stage=="Larva")
 sample_data(ps_larvae_final) <- cbind(rownames(sample_data(ps_larvae_final)),sample_data(ps_larvae_final))
 colnames(sample_data(ps_larvae_final))[1] <- "id"
+
+ps_final <- prune_taxa(taxa_sums(ps_noNAs_prevfilt) >= 79, ps_noNAs_prevfilt)
+ps_adults_final <- phyloseq::subset_samples(ps_final, stage=="Adult")
 sample_data(ps_adults_final) <- cbind(rownames(sample_data(ps_adults_final)),sample_data(ps_adults_final))
 colnames(sample_data(ps_adults_final))[1] <- "id"
-# for adult samples, add an extra group that breaks samples down further by sex to test for sex-specific differences in beta diversity/taxon abundance
+
+ps_final <- prune_taxa(taxa_sums(ps_noNAs_prevfilt) >= 79, ps_noNAs_prevfilt)
+sample_data(ps_final)$fullgroup <- paste(sample_data(ps_final)$sex,sample_data(ps_final)$group)
+ps_adults_sexed_final <- phyloseq::subset_samples(ps_final, stage=="Adult")
+sample_data(ps_adults_sexed_final) <- cbind(rownames(sample_data(ps_adults_sexed_final)),sample_data(ps_adults_sexed_final))
+colnames(sample_data(ps_adults_sexed_final))[1] <- "id"
+
+ps_final <- prune_taxa(taxa_sums(ps_noNAs_prevfilt) >= 79, ps_noNAs_prevfilt)
+sample_data(ps_final) <- cbind(rownames(sample_data(ps_final)),sample_data(ps_final))
+colnames(sample_data(ps_final))[1] <- "id"
 
 # run the phyloseq2qiime2 functions to convert our phyloseq objects into qiime-readable data
 # note: the output files are automatically created in our working directory
@@ -947,9 +722,7 @@ setwd("Data/QIIME2")
 phyloseq2qiime2(ps_final)
 phyloseq2qiime2(ps_larvae_final)
 phyloseq2qiime2(ps_adults_final)
-
-ps_H2O_adults_final <- phyloseq::subset_samples(ps_final, diet=="H2O" & stage=="Adult")
-phyloseq2qiime2(ps_H2O_adults_final)
+phyloseq2qiime2(ps_adults_sexed_final)
 
 ### Command line code for running DEICODE in qiime2 (ordination + beta diversity pairwise comparisons with PERMANOVA) ###
 
@@ -979,23 +752,24 @@ qiime emperor biplot --i-biplot ordination_larvae.qza --m-sample-metadata-file p
 qiime diversity beta-group-significance --i-distance-matrix distance_larvae.qza --m-metadata-file ps_larvae_final_sample-metadata.txt --m-metadata-column group --p-method permanova --p-pairwise --o-visualization group_significance-larvae.qzv
 
 # for adults only (N=36 samples)
-qiime tools import --input-path ps_adults_final_feature-table.biom --type 'FeatureTable[Frequency]' --input-format BIOMV100Format --output-path feature-table-adults.qza
-qiime tools import --type 'FeatureData[Taxonomy]' --input-format HeaderlessTSVTaxonomyFormat --input-path ps_adults_final_tax.txt --output-path taxonomy-adults.qza
-qiime deicode rpca --i-table feature-table-adults.qza --o-biplot ordination_adults.qza --o-distance-matrix distance_adults.qza
-qiime emperor biplot --i-biplot ordination_adults.qza --m-sample-metadata-file ps_adults_final_sample-metadata.txt --m-feature-metadata-file taxonomy-adults.qza --o-visualization biplot-adults.qzv --p-number-of-features 20
+qiime tools import --input-path ps_adults_sexed_final_feature-table.biom --type 'FeatureTable[Frequency]' --input-format BIOMV100Format --output-path feature-table-adults-sexed.qza
+qiime tools import --type 'FeatureData[Taxonomy]' --input-format HeaderlessTSVTaxonomyFormat --input-path ps_adults_sexed_final_tax.txt --output-path taxonomy-adults-sexed.qza
+qiime deicode rpca --i-table feature-table-adults-sexed.qza --o-biplot ordination_adults-sexed.qza --o-distance-matrix distance_adults-sexed.qza
+qiime emperor biplot --i-biplot ordination_adults-sexed.qza --m-sample-metadata-file ps_adults_sexed_final_sample-metadata.txt --m-feature-metadata-file taxonomy-adults-sexed.qza --o-visualization biplot-adults-sexed.qzv --p-number-of-features 20
 
 # PERMANOVA by sex (test statistic = 0.02913, p value = 0.987)
-qiime diversity beta-group-significance --i-distance-matrix distance_adults.qza --m-metadata-file ps_adults_final_sample-metadata.txt --m-metadata-column group --p-method permanova --p-pairwise --o-visualization sex_significance-adults.qzv
+qiime diversity beta-group-significance --i-distance-matrix distance_adults-sexed.qza --m-metadata-file ps_adults_sexed_final_sample-metadata.txt --m-metadata-column fullgroup --p-method permanova --p-pairwise --o-visualization sex_significance-adults.qzv
+qiime diversity beta-group-significance --i-distance-matrix distance_larvae.qza --m-metadata-file ps_larvae_final_sample-metadata.txt --m-metadata-column group --p-method permanova --p-pairwise --o-visualization significance-larvae.qzv
 
 
 ### From command line, run qurro to identify differentiating features
 
 # all samples
-qiime qurro loading-plot --i-table feature-table-all.qza --i-ranks ordination-all.qza --m-sample-metadata-file ps_final_sample-metadata.txt --m-feature-metadata-file taxonomy-all.qza --o-visualization qurro/qurro-plot-all.qzv 
+#qiime qurro loading-plot --i-table feature-table-all.qza --i-ranks ordination-all.qza --m-sample-metadata-file ps_final_sample-metadata.txt --m-feature-metadata-file taxonomy-all.qza --o-visualization qurro/qurro-plot-all.qzv 
 # larvae
-qiime qurro loading-plot --i-table feature-table-larvae.qza --i-ranks ordination_larvae.qza --m-sample-metadata-file ps_larvae_final_sample-metadata.txt --m-feature-metadata-file taxonomy-larvae.qza --o-visualization qurro/qurro-plot-larvae.qzv
+#qiime qurro loading-plot --i-table feature-table-larvae.qza --i-ranks ordination_larvae.qza --m-sample-metadata-file ps_larvae_final_sample-metadata.txt --m-feature-metadata-file taxonomy-larvae.qza --o-visualization qurro/qurro-plot-larvae.qzv
 # adults
-qiime qurro loading-plot --i-table feature-table-adults.qza --i-ranks ordination_adults.qza --m-sample-metadata-file ps_adults_final_sample-metadata.txt --m-feature-metadata-file taxonomy-adults.qza --o-visualization qurro/qurro-plot-adults.qzv 
+#qiime qurro loading-plot --i-table feature-table-adults.qza --i-ranks ordination_adults.qza --m-sample-metadata-file ps_adults_final_sample-metadata.txt --m-feature-metadata-file taxonomy-adults.qza --o-visualization qurro/qurro-plot-adults.qzv 
 
 ###### Graphics for DEICODE PCoA plot ######
 
@@ -1018,7 +792,7 @@ round(100*ord$data$ProportionExplained[1],2)
 
 # find proportion of variance explained by principal components axis 2 (32.15%)
 round(100*ord$data$ProportionExplained[2],2) 
-  
+
 PCoA_all_plot <-
   ggplot() +
   theme_bw() +
@@ -1037,61 +811,191 @@ ancombc2_allcomps$res_pair <- ancombc2(data=ps_final,fix_formula="group",group="
 # Export ANCOM-BC results to .csv files
 write.csv(ancombc2_allcomps$res_pair,"ANCOMBC2_comps_pairwise_allgroups.csv")
 
+# Run ANCOMBC2
+ps_adult_males <- phyloseq::subset_samples(ps_final, stage=="Adult" & sex=="M")
+ancom_adult_males <- ancombc2(data=ps_adult_males,fix_formula="group",group="group",pairwise=TRUE,p_adj_method = "holm",struc_zero=TRUE, prv_cut=0)
+
+ps_adult_females <- phyloseq::subset_samples(ps_final, stage=="Adult" & sex=="F")
+ancom_adult_females <- ancombc2(data=ps_adult_females,fix_formula="group",group="group",pairwise=TRUE,p_adj_method = "holm",struc_zero=TRUE, prv_cut=0)
+
+ps_larvae <- phyloseq::subset_samples(ps_final, stage=="Larva")
+ancom_larvae <- ancombc2(data=ps_larvae,fix_formula="group",group="group",pairwise=TRUE,p_adj_method = "holm",struc_zero=TRUE, prv_cut=0)
+
+# DOX G3 L vs. H2O G3 L (5, 188, 347)
+ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae_groupG3 DOX larvae`,c("taxon","lfc_groupG3 H2O larvae_groupG3 DOX larvae","se_groupG3 H2O larvae_groupG3 DOX larvae","q_groupG3 H2O larvae_groupG3 DOX larvae")]
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G3 DOX larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G3 H2O larvae)`),])
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G3 H2O larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G3 DOX larvae)`),])
+# ATC G3 L vs. H2O G3 L (6, 174, 325)
+ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae`,c("taxon","lfc_groupG3 H2O larvae","se_groupG3 H2O larvae","q_groupG3 H2O larvae")]
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G3 ATC larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G3 H2O larvae)`),])
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G3 H2O larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G3 ATC larvae)`),])
+# DOX G4 L vs. H2O G4 L (1, 184, 344)
+ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG4 H2O larvae_groupG4 DOX larvae`,c("taxon","lfc_groupG4 H2O larvae_groupG4 DOX larvae","se_groupG4 H2O larvae_groupG4 DOX larvae","q_groupG4 H2O larvae_groupG4 DOX larvae")]
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G4 DOX larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G4 H2O larvae)`),])
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G4 H2O larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G4 DOX larvae)`),])
+# ATC G4 L vs. H2O G4 L (0, 327, 117)
+ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG4 H2O larvae_groupG4 ATC larvae`,c("taxon","lfc_groupG4 H2O larvae_groupG4 ATC larvae","se_groupG4 H2O larvae_groupG4 ATC larvae","q_groupG4 H2O larvae_groupG4 ATC larvae")]
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G4 ATC larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G4 H2O larvae)`),])
+dim(ancom_larvae$zero_ind[ancom_larvae$zero_ind$`structural_zero (group = G4 H2O larvae)` & !(ancom_larvae$zero_ind$`structural_zero (group = G4 ATC larvae)`),])
+
+### adult male comparisons
+# DOX G3 A vs. H2O G3 A (0, 150, 200)
+ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG3 H2O adults_groupG3 DOX adults`,c("taxon","lfc_groupG3 H2O adults_groupG3 DOX adults","se_groupG3 H2O adults_groupG3 DOX adults","q_groupG3 H2O adults_groupG3 DOX adults")]
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G3 DOX adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G3 H2O adults)`),])
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G3 H2O adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G3 DOX adults)`),])
+# ATC G3 A vs. H2O G3 A (0, 155, 236)
+ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG3 H2O adults`,c("taxon","lfc_groupG3 H2O adults","se_groupG3 H2O adults","q_groupG3 H2O adults")]
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G3 ATC adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G3 H2O adults)`),])
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G3 H2O adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G3 ATC adults)`),])
+# DOX G4 A vs. H2O G4 A (7, 1044, 236)
+dim(ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")])
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G4 DOX adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G4 H2O adults)`),])
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G4 H2O adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G4 DOX adults)`),])
+# ATC G4 A vs. H2O G4 A (0, 866, 69)
+ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG4 H2O adults_groupG4 ATC adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 ATC adults","se_groupG4 H2O adults_groupG4 ATC adults","q_groupG4 H2O adults_groupG4 ATC adults")]
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G4 ATC adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G4 H2O adults)`),])
+dim(ancom_adult_males$zero_ind[ancom_adult_males$zero_ind$`structural_zero (group = G4 H2O adults)` & !(ancom_adult_males$zero_ind$`structural_zero (group = G4 ATC adults)`),])
+
+### adult female comparisons
+# DOX G3 A vs. H2O G3 A (0, 263, 166)
+ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG3 H2O adults_groupG3 DOX adults`,c("taxon","lfc_groupG3 H2O adults_groupG3 DOX adults","se_groupG3 H2O adults_groupG3 DOX adults","q_groupG3 H2O adults_groupG3 DOX adults")]
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G3 DOX adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G3 H2O adults)`),])
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G3 H2O adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G3 DOX adults)`),])
+# ATC G3 A vs. H2O G3 A (0, 143, 279)
+ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG3 H2O adults`,c("taxon","lfc_groupG3 H2O adults","se_groupG3 H2O adults","q_groupG3 H2O adults")]
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G3 ATC adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G3 H2O adults)`),])
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G3 H2O adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G3 ATC adults)`),])
+# DOX G4 A vs. H2O G4 A (13, 766, 272)
+dim(ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")])
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G4 DOX adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G4 H2O adults)`),])
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G4 H2O adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G4 DOX adults)`),])
+# ATC G4 A vs. H2O G4 A (1, 537, 234)
+ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 ATC adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 ATC adults","se_groupG4 H2O adults_groupG4 ATC adults","q_groupG4 H2O adults_groupG4 ATC adults")]
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G4 ATC adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G4 H2O adults)`),])
+dim(ancom_adult_females$zero_ind[ancom_adult_females$zero_ind$`structural_zero (group = G4 H2O adults)` & !(ancom_adult_females$zero_ind$`structural_zero (group = G4 ATC adults)`),])
+
+# Export differentially abundant taxa
+G3DOXL <- ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae_groupG3 DOX larvae`,c("taxon","lfc_groupG3 H2O larvae_groupG3 DOX larvae","se_groupG3 H2O larvae_groupG3 DOX larvae","q_groupG3 H2O larvae_groupG3 DOX larvae")]
+G3DOXL[,5:8] <- tax_table(ps_final)[ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae_groupG3 DOX larvae`,c("taxon","lfc_groupG3 H2O larvae_groupG3 DOX larvae","se_groupG3 H2O larvae_groupG3 DOX larvae","q_groupG3 H2O larvae_groupG3 DOX larvae")][,1],3:6]
+write.csv(G3DOXL,"G3DOXL.csv")
+G3ATCL <- ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae`,c("taxon","lfc_groupG3 H2O larvae","se_groupG3 H2O larvae","q_groupG3 H2O larvae")]
+G3ATCL[,5:8] <- tax_table(ps_final)[ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG3 H2O larvae`,c("taxon","lfc_groupG3 H2O larvae","se_groupG3 H2O larvae","q_groupG3 H2O larvae")][,1],3:6]
+write.csv(G3ATCL,"G3ATCL.csv")
+G4DOXL <- ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG4 H2O larvae_groupG4 DOX larvae`,c("taxon","lfc_groupG4 H2O larvae_groupG4 DOX larvae","se_groupG4 H2O larvae_groupG4 DOX larvae","q_groupG4 H2O larvae_groupG4 DOX larvae")]
+G4DOXL[,5:8] <- tax_table(ps_final)[ancom_larvae$res_pair[ancom_larvae$res_pair$`diff_groupG4 H2O larvae_groupG4 DOX larvae`,c("taxon","lfc_groupG4 H2O larvae_groupG4 DOX larvae","se_groupG4 H2O larvae_groupG4 DOX larvae","q_groupG4 H2O larvae_groupG4 DOX larvae")][,1],3:6]
+write.csv(G4DOXL,"G4DOXL.csv")
+G4DOXA_males <- ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")]
+G4DOXA_males[,5:8] <- tax_table(ps_final)[ancom_adult_males$res_pair[ancom_adult_males$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")][,1],3:6]
+write.csv(G4DOXA_males,"G4DOXA_males.csv")
+G4DOXA_females <- ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")]
+G4DOXA_females[,5:8] <- tax_table(ps_final)[ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 DOX adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 DOX adults","se_groupG4 H2O adults_groupG4 DOX adults","q_groupG4 H2O adults_groupG4 DOX adults")][,1],3:6]
+write.csv(G4DOXA_females,"G4DOXA_females.csv")
+G4ATCA_females <- ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 ATC adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 ATC adults","se_groupG4 H2O adults_groupG4 ATC adults","q_groupG4 H2O adults_groupG4 ATC adults")]
+G4ATCA_females[,5:8] <- tax_table(ps_final)[ancom_adult_females$res_pair[ancom_adult_females$res_pair$`diff_groupG4 H2O adults_groupG4 ATC adults`,c("taxon","lfc_groupG4 H2O adults_groupG4 ATC adults","se_groupG4 H2O adults_groupG4 ATC adults","q_groupG4 H2O adults_groupG4 ATC adults")][,1],3:6]
+write.csv(G4ATCA_females,"G4ATCA_females.csv")
+
+# export ANCOMBC2 results
+write.csv(ancom_larvae$res_pair,"ANCOMBC2_larvae_respair.csv")
+write.csv(ancom_larvae$zero_ind,"ANCOMBC2_larvae_structzeroes.csv")
+write.csv(ancom_adult_males$res_pair,"ANCOMBC2_adult_males_respair.csv")
+write.csv(ancom_adult_males$zero_ind,"ANCOMBC2_adult_males_structzeroes.csv")
+write.csv(ancom_adult_females$res_pair,"ANCOMBC2_adult_females_respair.csv")
+write.csv(ancom_adult_females$zero_ind,"ANCOMBC2_adult_females_structzeroes.csv")
+
+# export final datasets (ASV table, taxonomy table and reference sequences)
+write.csv(otu_table(ps_final),"ASV_table.csv")
+write.csv(tax_table(ps_final),"taxonomy_table.csv")
+write.csv(refseq(ps_final),"refseq.csv")
+
 ######## BAR PLOTS FOR DIFFERENTIAL ABUNDANCE TESTING ########
 
 # first, we will agglomerate taxa at genus level, which requires us to normalize the dataset afterwards
 ps_glom <- tax_glom(ps_final, taxrank="genus", NArm=FALSE)
-SRS.shiny.app(as.data.frame(t(otu_table(ps_glom)))) #Cmin = 65,258 reads
-normalized_otu_table_glom <- t(SRS(as.data.frame(t(otu_table(ps_glom))),65258))
+SRS.shiny.app(as.data.frame(t(otu_table(ps_glom)))) #Cmin = 65,135 reads
+normalized_otu_table_glom <- t(SRS(as.data.frame(t(otu_table(ps_glom))),65135))
 colnames(normalized_otu_table_glom) <- colnames(otu_table(ps_glom))
 ps_norm_glom <- phyloseq(otu_table(normalized_otu_table_glom, taxa_are_rows=FALSE), sample_data(sample_data), tax_table(tax_table(ps_glom)))
 
-### first, we make a dataframe with proportions of each of the top 20 ASVs (genus level)
+### first, we make a dataframe with proportions of each of the top 12 ASVs in larvae and adults at the genus level
 
-top12 <- (otu_table(ps_norm_glom)[,1:12]/65258)
-colnames(top12) <- tax_table(ps_norm_glom)[1:12,"genus"]
-top12 <- cbind.data.frame(top12,as.vector(sample_data(ps_norm_glom)$group))
-top12 <- cbind.data.frame(top12,as.vector(sample_data(ps_norm_glom)$diet))
-top12 <- cbind.data.frame(top12,as.vector(sample_data(ps_norm_glom)$generation))
-top12 <- cbind.data.frame(top12,as.vector(sample_data(ps_norm_glom)$stage))
+ps_norm_glom_H2OL <- phyloseq::subset_samples(ps_norm_glom, stage=="Larva" & diet=="H2O")
+ps_norm_glom_H2OA <- phyloseq::subset_samples(ps_norm_glom, stage=="Adult" & diet=="H2O")
+ps_norm_glom_L <- phyloseq::subset_samples(ps_norm_glom, stage=="Larva")
+ps_norm_glom_A <- phyloseq::subset_samples(ps_norm_glom, stage=="Adult")
 
-colnames(top12)[13:16] <- c("group","diet","generation","stage")
-top10 <- top12[,c(1:9,12:16)] # remove taxa that could not be placed to genus level
+top_10_L <- (otu_table(ps_norm_glom_L)[,rownames(tax_table(tax_sort(ps_norm_glom_H2OL,by=mean))[c(1:9,11),5:6])]/65135)
+colnames(top_10_L) <- (tax_table(tax_sort(ps_norm_glom_H2OL,by=mean))[c(1:9,11),6])
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$group))
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$diet))
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$generation))
 
-write.csv(as.data.frame(top10), file="top10_genera.csv")
+top_10_A <- (otu_table(ps_norm_glom_A)[,rownames(tax_table(tax_sort(ps_norm_glom_H2OA,by=mean))[c(1:7,9:11),5:6])]/65135)
+colnames(top_10_A) <- (tax_table(tax_sort(ps_norm_glom_H2OA,by=mean))[c(1:7,9:11),6])
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$group))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$diet))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$generation))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$fullgroup))
 
-vec <- rep(1,120)
-for (x in 1:10) { for (y in 1:12) { vec[(x-1)*12+y] = colnames(top10)[x] }}
+colnames(top_10_L)[11:13] <- c("group","diet","generation")
+colnames(top_10_A)[11:14] <- c("group","diet","generation","fullgroup")
+
+write.csv(as.data.frame(top_10_L), file="top10L_genera.csv")
+
+vec <- rep(1,60)
+for (x in 1:10) { for (y in 1:6) { vec[(x-1)*6+y] = colnames(top_10_L)[x] }}
 vec <- unlist(vec)
-vec <- cbind.data.frame(vec,rep(levels(sample_data(ps_norm_glom)$group),10))
-vec[,3] <- 1:120
+vec <- cbind.data.frame(vec,rep(levels(sample_data(ps_norm_glom_L)$group),10))
+vec[,3] <- 1:60
 for (taxonid in 1:10) {
-  averages = aggregate(top10[,taxonid], list(top10$group), FUN=mean)
-  for (groupid in 1:12) { vec[(taxonid-1)*12+groupid, 3] <- averages[groupid, 2] }
+  averages = aggregate(top_10_L[,taxonid], list(top_10_L$group), FUN=mean)
+  for (groupid in 1:6) { vec[(taxonid-1)*6+groupid, 3] <- averages[groupid, 2] }
+}
+
+vec_Ag <- rep(1,60)
+for (x in 1:10) { for (y in 1:6) { vec_Ag[(x-1)*6+y] = colnames(top_10_A)[x] }}
+vec_Ag <- unlist(vec_Ag)
+vec_Ag <- cbind.data.frame(vec_Ag,rep(levels(sample_data(ps_norm_glom_A)$group),10))
+vec_Ag[,3] <- 1:60
+for (taxonid in 1:10) {
+  averages = aggregate(top_10_A[,taxonid], list(top_10_A$group), FUN=mean)
+  for (groupid in 1:6) { vec_Ag[(taxonid-1)*6+groupid, 3] <- averages[groupid, 2] }
 }
 
 colnames(vec) <- c("taxon","group","mean.prop")
-vec$stage <- rep(c("Adults", "Larvae"), length.out=nrow(vec))
+colnames(vec_Ag) <- c("taxon","group","mean.prop")
 
 # define a good color palette for plotting
-palette <- c("navy", "skyblue2", "darkcyan", "aquamarine2", "limegreen", "greenyellow", "khaki1", "orange", "#df4a53","orchid1")
+palette_L <- c("navy", "skyblue2", "darkcyan", "aquamarine2", "limegreen", "greenyellow", "khaki1", "orange", "#df4a53","orchid1")
+palette_A <- c("skyblue2", "darkcyan", "aquamarine2","khaki1","#df4a53","orchid1","gray80","gray60","gray40","gray20")
+palette_all <- c("navy", "skyblue2", "darkcyan", "aquamarine2", "limegreen", "greenyellow", "khaki1", "orange", "#df4a53","orchid1","gray80","gray60","gray40","gray20")
+c("Myroides","Morganella","Providencia","Acinetobacter", "Bacteroides", "Vagococcus", "Pseudomonas", "Peptoniphilus", "Staphylococcus", "Sphingobacterium","Mycoplasma","Psychrilyobacter","Undibacterium","Gaiella")
 
 #### plot the genus-level proportional data
 
 # plot larvae
-larvae_barplot_genus <- ggplot(data=subset(vec,stage=="Larvae"), aes(forcats::fct_relevel(group,"G3 DOX larvae","G4 DOX larvae","G3 ATC larvae","G4 ATC larvae","G3 H2O larvae","G4 H2O larvae"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Providencia","Morganella","Myroides","Staphylococcus", "Acinetobacter", "Bacteroides", "Pseudomonas", "Sphingobacterium", "Vagococcus", "Mycoplasma"))))) + 
+larvae_barplot_genus <- ggplot(data=vec, aes(forcats::fct_relevel(group,"G3 DOX larvae","G4 DOX larvae","G3 ATC larvae","G4 ATC larvae","G3 H2O larvae","G4 H2O larvae"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Myroides","Morganella","Providencia","Acinetobacter", "Bacteroides", "Vagococcus", "Pseudomonas", "Peptoniphilus", "Staphylococcus", "Sphingobacterium"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
+  scale_fill_manual(values=rev(palette_L)) +
   theme(panel.background = element_blank(), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
   theme(aspect.ratio = 1.2, legend.position="none")
 
 larvae_barplot_genus
 
-# plot adults
-adults_barplot_genus <- ggplot(data=subset(vec,stage=="Adults"), aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Providencia","Morganella","Myroides","Staphylococcus", "Acinetobacter", "Bacteroides", "Pseudomonas", "Sphingobacterium", "Vagococcus", "Mycoplasma"))))) + 
+# plot adults (fullgroup)
+#adults_fullgroup_barplot_genus <- ggplot(data=vec_A, aes(forcats::fct_relevel(group,"M G3 DOX adults","F G3 DOX adults","M G4 DOX adults","F G4 DOX adults","M G3 ATC adults","F G3 ATC adults","M G4 ATC adults","F G4 ATC adults","M G3 H2O adults","F G3 H2O adults","M G4 H2O adults","F G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Providencia","Pseudomonas","Morganella","Staphylococcus", "Acinetobacter", "Mycoplasma", "Sphingobacterium", "Psychrilyobacter", "Undibacterium", "Gaiella"))))) + 
+ # geom_bar(stat="identity") + 
+  #scale_fill_manual(values=rev(palette_A)) +
+  #theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
+  #scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
+  #guides(fill = guide_legend(title = "Genus")) +
+  #theme(aspect.ratio = 1.2, legend.position="none")
+#adults_fullgroup_barplot_genus
+
+# plot adults (group)
+adults_barplot_genus <- ggplot(data=vec_Ag, aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Morganella","Providencia","Acinetobacter","Pseudomonas","Staphylococcus","Sphingobacterium","Mycoplasma","Psychrilyobacter","Undibacterium","Gaiella"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
+  scale_fill_manual(values=rev(palette_A)) +
   theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
   guides(fill = guide_legend(title = "Genus")) +
@@ -1100,80 +1004,121 @@ adults_barplot_genus <- ggplot(data=subset(vec,stage=="Adults"), aes(forcats::fc
 adults_barplot_genus
 
 # plot legend
-barplot_legend_genus <- ggplot(data=subset(vec,stage=="Adults"), aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Providencia","Morganella","Myroides","Staphylococcus", "Acinetobacter", "Bacteroides", "Pseudomonas", "Sphingobacterium", "Vagococcus", "Enterobacteriaceae", "Hafniaceae", "Mycoplasma"))))) + 
+
+combination_top <- rbind(vec,vec_Ag[c(31:36,43:60),])
+
+legend_genus <- ggplot(data=combination_top, aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Myroides","Morganella","Providencia","Acinetobacter", "Bacteroides", "Vagococcus", "Pseudomonas", "Peptoniphilus", "Staphylococcus", "Sphingobacterium","Mycoplasma","Psychrilyobacter","Undibacterium","Gaiella"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
-  theme(panel.background = element_blank(), legend.text = element_text(size=10), legend.title = element_text(size=12), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
+  scale_fill_manual(values=rev(palette_all)) +
+  theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
   guides(fill = guide_legend(title = "Genus")) +
   theme(aspect.ratio = 0.5, legend.position="left")
 
-barplot_legend_genus
+legend_genus
 
 #### next, we repeat this at the family level
 
-ps_glomf <- tax_glom(ps_final, taxrank="family", NArm=FALSE)
-SRS.shiny.app(as.data.frame(t(otu_table(ps_glomf)))) #Cmin = 65,258 reads
-normalized_otu_table_glomf <- t(SRS(as.data.frame(t(otu_table(ps_glomf))),65258))
-colnames(normalized_otu_table_glomf) <- colnames(otu_table(ps_glomf))
-ps_norm_glomf <- phyloseq(otu_table(normalized_otu_table_glomf, taxa_are_rows=FALSE), sample_data(sample_data), tax_table(tax_table(ps_glomf)))
+vecL_g <- vec
+vecAg_g <- vecAg
 
-top10f <- (otu_table(ps_norm_glomf)[,1:10]/65258)
-colnames(top10f) <- tax_table(ps_norm_glomf)[1:10,"family"]
-top10f <- cbind.data.frame(top10f,as.vector(sample_data(ps_norm_glomf)$group))
-colnames(top10f)[11] <- "group"
+# first, we will agglomerate taxa at family level, which requires us to normalize the dataset afterwards
+ps_glom <- tax_glom(ps_final, taxrank="family", NArm=FALSE)
+SRS.shiny.app(as.data.frame(t(otu_table(ps_glom)))) #Cmin = 65,135 reads
+normalized_otu_table_glom <- t(SRS(as.data.frame(t(otu_table(ps_glom))),65135))
+colnames(normalized_otu_table_glom) <- colnames(otu_table(ps_glom))
+ps_norm_glom <- phyloseq(otu_table(normalized_otu_table_glom, taxa_are_rows=FALSE), sample_data(sample_data), tax_table(tax_table(ps_glom)))
 
-write.csv(as.data.frame(top10f), file="top10_families.csv")
+### first, we make a dataframe with proportions of each of the top 12 ASVs in larvae and adults at the genus level
 
-vec_f <- rep(1,120)
-for (x in 1:10) { for (y in 1:12) { vec_f[(x-1)*12+y] = colnames(top10f)[x] }}
-vec_f <- unlist(vec_f)
-vec_f <- cbind.data.frame(vec_f,rep(levels(sample_data(ps_norm_glomf)$group),10))
-vec_f[,3] <- 1:120
+ps_norm_glom_H2OL <- phyloseq::subset_samples(ps_norm_glom, stage=="Larva" & diet=="H2O")
+ps_norm_glom_H2OA <- phyloseq::subset_samples(ps_norm_glom, stage=="Adult" & diet=="H2O")
+ps_norm_glom_L <- phyloseq::subset_samples(ps_norm_glom, stage=="Larva")
+ps_norm_glom_A <- phyloseq::subset_samples(ps_norm_glom, stage=="Adult")
+
+tax_table(tax_sort(ps_norm_glom_H2OL,by=mean))[1:18,5]
+tax_table(tax_sort(ps_norm_glom_H2OA,by=mean))[1:18,5]
+
+top_10_L <- (otu_table(ps_norm_glom_L)[,rownames(tax_table(tax_sort(ps_norm_glom_H2OL,by=mean))[c(1:6,8:11),5])]/65135)
+colnames(top_10_L) <- (tax_table(tax_sort(ps_norm_glom_H2OL,by=mean))[c(1:6,8:11),5])
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$group))
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$diet))
+top_10_L <- cbind.data.frame(top_10_L,as.vector(sample_data(ps_norm_glom_L)$generation))
+
+top_10_A <- (otu_table(ps_norm_glom_A)[,rownames(tax_table(tax_sort(ps_norm_glom_H2OA,by=mean))[c(1:6,8:11),5])]/65135)
+colnames(top_10_A) <- (tax_table(tax_sort(ps_norm_glom_H2OA,by=mean))[c(1:6,8:11),5])
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$group))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$diet))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$generation))
+top_10_A <- cbind.data.frame(top_10_A,as.vector(sample_data(ps_norm_glom_A)$fullgroup))
+
+colnames(top_10_L)[11:13] <- c("group","diet","generation")
+colnames(top_10_A)[11:14] <- c("group","diet","generation","fullgroup")
+
+vec <- rep(1,60)
+for (x in 1:10) { for (y in 1:6) { vec[(x-1)*6+y] = colnames(top_10_L)[x] }}
+vec <- unlist(vec)
+vec <- cbind.data.frame(vec,rep(levels(sample_data(ps_norm_glom_L)$group),10))
+vec[,3] <- 1:60
 for (taxonid in 1:10) {
-  averages = aggregate(top10f[,taxonid], list(top10f$group), FUN=mean)
-  for (groupid in 1:12) { vec_f[(taxonid-1)*12+groupid, 3] <- averages[groupid, 2] }
+  averages = aggregate(top_10_L[,taxonid], list(top_10_L$group), FUN=mean)
+  for (groupid in 1:6) { vec[(taxonid-1)*6+groupid, 3] <- averages[groupid, 2] }
 }
 
-colnames(vec_f) <- c("taxon","group","mean.prop")
-vec_f$stage <- rep(c("Adults", "Larvae"), length.out=nrow(vec_f))
+vec_Ag <- rep(1,60)
+for (x in 1:10) { for (y in 1:6) { vec_Ag[(x-1)*6+y] = colnames(top_10_A)[x] }}
+vec_Ag <- unlist(vec_Ag)
+vec_Ag <- cbind.data.frame(vec_Ag,rep(levels(sample_data(ps_norm_glom_A)$group),10))
+vec_Ag[,3] <- 1:60
+for (taxonid in 1:10) {
+  averages = aggregate(top_10_A[,taxonid], list(top_10_A$group), FUN=mean)
+  for (groupid in 1:6) { vec_Ag[(taxonid-1)*6+groupid, 3] <- averages[groupid, 2] }
+}
 
-palette <- c("navy", "darkcyan", "aquamarine2", "limegreen", "greenyellow", "khaki1", "orange", "#df4a53","#EAD6FF","#AE9EFF")
+colnames(vec) <- c("taxon","group","mean.prop")
+colnames(vec_Ag) <- c("taxon","group","mean.prop")
+
+# define a good color palette for plotting
+palette_L <- c("navy","darkcyan","aquamarine2","limegreen","greenyellow","khaki1","#df4a53","bisque2","orchid1","purple")
+palette_A <- c("darkcyan","aquamarine2","khaki1","#df4a53","orchid1","purple","gray80","gray40","gray60","sienna")
+palette_all <- c("navy","darkcyan","aquamarine2","limegreen","greenyellow","khaki1","#df4a53","orchid1","purple","gray80","gray60","gray40","bisque2","sienna")
 
 # plot larvae
-larvae_barplot_family <- ggplot(data=subset(vec_f,stage=="Larvae"), aes(forcats::fct_relevel(group,"G3 DOX larvae","G4 DOX larvae","G3 ATC larvae","G4 ATC larvae","G3 H2O larvae","G4 H2O larvae"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Morganellaceae","Flavobacteriaceae","Staphylococcaceae","Moraxellaceae", "Bacteroidaceae", "Pseudomonadaceae", "Sphingobacteriaceae", "Vagococcaceae", "Enterobacteriaceae", "Hafniaceae"))))) + 
+larvae_barplot_family <- ggplot(data=vec, aes(forcats::fct_relevel(group,"G3 DOX larvae","G4 DOX larvae","G3 ATC larvae","G4 ATC larvae","G3 H2O larvae","G4 H2O larvae"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Flavobacteriaceae","Morganellaceae","Moraxellaceae","Bacteroidaceae","Vagococcaceae","Pseudomonadaceae","Staphylococcaceae","Hafniaceae","Sphingobacteriaceae","Xanthomonadaceae"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
-  theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
+  scale_fill_manual(values=rev(palette_L)) +
+  theme(panel.background = element_blank(), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
-  guides(fill = guide_legend(title = "Family")) +
   theme(aspect.ratio = 1.2, legend.position="none")
 
 larvae_barplot_family
 
-# plot adults
-adults_barplot_family <- ggplot(data=subset(vec_f,stage=="Adults"), aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Morganellaceae","Flavobacteriaceae","Staphylococcaceae","Moraxellaceae", "Bacteroidaceae", "Pseudomonadaceae", "Sphingobacteriaceae", "Vagococcaceae", "Enterobacteriaceae", "Hafniaceae"))))) + 
+# plot adults (group)
+adults_barplot_family <- ggplot(data=vec_Ag, aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Morganellaceae","Moraxellaceae","Pseudomonadaceae","Staphylococcaceae","Sphingobacteriaceae","Xanthomonadaceae","Mycoplasmataceae","Oxalobacteraceae","Fusobacteriaceae","Nitrosomonadaceae"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
+  scale_fill_manual(values=rev(palette_A)) +
   theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
-  guides(fill = guide_legend(title = "Family")) +
+  guides(fill = guide_legend(title = "Genus")) +
   theme(aspect.ratio = 1.2, legend.position="none")
 
 adults_barplot_family
 
 # plot legend
-barplot_legend_family <- ggplot(data=subset(vec_f,stage=="Adults"), aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Morganellaceae","Flavobacteriaceae","Staphylococcaceae","Moraxellaceae", "Bacteroidaceae", "Pseudomonadaceae", "Sphingobacteriaceae", "Vagococcaceae", "Enterobacteriaceae", "Hafniaceae"))))) + 
+
+combination_top <- rbind(vec,vec_Ag[c(31:42,49:60),])
+
+legend_family <- ggplot(data=combination_top, aes(forcats::fct_relevel(group,"G3 DOX adults","G4 DOX adults","G3 ATC adults","G4 ATC adults","G3 H2O adults","G4 H2O adults"), y=mean.prop, fill=forcats::fct_relevel(taxon,rev(c("Flavobacteriaceae","Morganellaceae","Moraxellaceae","Bacteroidaceae","Vagococcaceae","Pseudomonadaceae","Staphylococcaceae","Sphingobacteriaceae","Hafniaceae","Mycoplasmataceae","Fusobacteriaceae","Oxalobacteraceae","Xanthomonadaceae","Nitrosomonadaceae"))))) + 
   geom_bar(stat="identity") + 
-  scale_fill_manual(values=rev(palette)) +
-  theme(panel.background = element_blank(), legend.text = element_text(size=10), legend.title = element_text(size=12), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
+  scale_fill_manual(values=rev(palette_all)) +
+  theme(panel.background = element_blank(), legend.text = element_text(size=8), legend.title = element_text(size=10), axis.line = element_line(size = 0.5, colour = "gray30"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.x = element_blank(), axis.title.y = element_text(size=10), axis.text.y = element_text(size=10), axis.text.x = element_blank(), strip.text.x= element_text(size=15)) + 
   scale_y_continuous(limits = c(0, 1), expand = c(0, 0)) +
   guides(fill = guide_legend(title = "Family")) +
   theme(aspect.ratio = 0.5, legend.position="left")
 
-barplot_legend_family
+legend_family
 
-barplots_vertical <- plot_grid(larvae_barplot_genus, adults_barplot_genus, barplot_legend_genus, larvae_barplot_family, adults_barplot_family, barplot_legend_family, ncol=3, align="h")
+barplots_vertical <- plot_grid(larvae_barplot_genus, adults_barplot_genus, legend_genus, larvae_barplot_family, adults_barplot_family, legend_family, ncol=3, align="h")
 barplots_vertical
 
 #### Plotting the abundance of selected taxa #####
@@ -1468,16 +1413,16 @@ comboplot1 <- ggplot(combo1,aes(factor(order),lfc)) +
 comboplot1
 
 #comboplot1 <- ggplot(combo1,aes(factor(order),lfc,color=ID)) + 
-  #theme(plot.background = element_rect(fill = "transparent", colour = NA), panel.background = element_rect(fill="white", colour = "black"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.y = element_text(size=12), axis.text.y = element_text(size=10), axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.y=element_line(), axis.ticks.x=element_blank(),strip.text.x=element_blank(),strip.background=element_rect(fill="transparent")) +
-  #geom_bar_pattern(aes(fill=factor(order),pattern=factor(order),pattern_fill=factor(order),pattern_color=factor(order),color=factor(order),pattern_angle=factor(order),pattern_type=factor(order),pattern_density=factor(order),pattern_spacing=factor(order),pattern_yoffset=factor(order)),color="black",fill=combo1$colors, pattern=combo1$patterns, pattern_fill=combo1$patternsfill, pattern_color=combo1$patternsfill,pattern_angle=as.numeric(combo1$angles), pattern_type=combo1$types, pattern_density=as.numeric(combo1$densities), pattern_spacing=as.numeric(combo1$spacing), pattern_yoffset=as.numeric(combo1$y.offset), stat="identity",width=c(0.45,0.8,0.8,0.45,0.45,rep(0.8,39))) +
-  #scale_y_continuous(limits = c(-7.8, 7.8),breaks=seq(-7,7,by=1),expand=c(0,0)) +
-  #facet_grid(~factor(comp,levels=c("G3DOXLvG3H2OL","G3ATCLvG3H2OL","G3DOXAvG3ATCA","G4DOXLvG4H2OL","G4ATCLvG4H2OL","G4DOXLvG4ATCL","G4ATCAvG4H2OA","G4DOXAvG4H2OA","G4DOXAvG4ATCA")),scales="free_x",space="free_x") +
-  #labs(y="log fold change") +
-  #geom_text(aes(label=ID),color="black",position=position_stack(vjust=0.5), angle=90) +
-  #geom_hline(yintercept = 0,colour="gray60") +
- # geom_errorbar(aes(ymin=lfc, ymax=lfc+se), width=c(0.45,0.8,0.8,0.45,0.45,rep(0.8,39)),color="black") +
-  #force_panelsizes(rows=rep(1,8),cols=c(0.2,0.2,0.2,0.2,0.2,1.3,1.2,1.2),respect=FALSE)
- 
+#theme(plot.background = element_rect(fill = "transparent", colour = NA), panel.background = element_rect(fill="white", colour = "black"), panel.grid.minor=element_blank(), panel.grid.major = element_blank(), axis.title.y = element_text(size=12), axis.text.y = element_text(size=10), axis.text.x = element_blank(), axis.title.x = element_blank(), axis.ticks.y=element_line(), axis.ticks.x=element_blank(),strip.text.x=element_blank(),strip.background=element_rect(fill="transparent")) +
+#geom_bar_pattern(aes(fill=factor(order),pattern=factor(order),pattern_fill=factor(order),pattern_color=factor(order),color=factor(order),pattern_angle=factor(order),pattern_type=factor(order),pattern_density=factor(order),pattern_spacing=factor(order),pattern_yoffset=factor(order)),color="black",fill=combo1$colors, pattern=combo1$patterns, pattern_fill=combo1$patternsfill, pattern_color=combo1$patternsfill,pattern_angle=as.numeric(combo1$angles), pattern_type=combo1$types, pattern_density=as.numeric(combo1$densities), pattern_spacing=as.numeric(combo1$spacing), pattern_yoffset=as.numeric(combo1$y.offset), stat="identity",width=c(0.45,0.8,0.8,0.45,0.45,rep(0.8,39))) +
+#scale_y_continuous(limits = c(-7.8, 7.8),breaks=seq(-7,7,by=1),expand=c(0,0)) +
+#facet_grid(~factor(comp,levels=c("G3DOXLvG3H2OL","G3ATCLvG3H2OL","G3DOXAvG3ATCA","G4DOXLvG4H2OL","G4ATCLvG4H2OL","G4DOXLvG4ATCL","G4ATCAvG4H2OA","G4DOXAvG4H2OA","G4DOXAvG4ATCA")),scales="free_x",space="free_x") +
+#labs(y="log fold change") +
+#geom_text(aes(label=ID),color="black",position=position_stack(vjust=0.5), angle=90) +
+#geom_hline(yintercept = 0,colour="gray60") +
+# geom_errorbar(aes(ymin=lfc, ymax=lfc+se), width=c(0.45,0.8,0.8,0.45,0.45,rep(0.8,39)),color="black") +
+#force_panelsizes(rows=rep(1,8),cols=c(0.2,0.2,0.2,0.2,0.2,1.3,1.2,1.2),respect=FALSE)
+
 comboplot1
 
 combo2 <- rbind(G4vG3smallmerged,top12_G4DOXAvG3DOXAmerged,top12_G4ATCAvG3ATCAmerged)
@@ -1520,7 +1465,7 @@ lfc_plots
 ############## qPCR data ############## 
 
 # Import qPCR data file #
-qPCRstats <- read.csv("qPCRdata.csv")
+qPCRstats <- read.csv("qPCRdata2.csv")
 qPCRstats_L <- qPCRstats[qPCRstats$stage == "Larvae",]
 qPCRstats_A <- qPCRstats[qPCRstats$stage == "Adults",]
 
@@ -1620,6 +1565,11 @@ pairwise.table.t <- function (compare.levels.t, level.names, p.adjust.method)
   pp
 }
 
+res.aov.16S <- aov(ddCt16S ~ group, data = qPCRstats)
+summary(res.aov.16S)
+comps_16S <- pairwise.t.test(qPCRstats$ddCt16S, qPCRstats$group,p.adjust.method="BH")
+comps_16S$p.value
+
 # Adults, 16S gene
 res.aov.16S_A <- aov(ddCt16S ~ group, data = qPCRstats_A)
 summary(res.aov.16S_A)
@@ -1690,8 +1640,6 @@ rownames(pvals_COXI_A_df)[1] <- "G3 Adults ATC"
 rownames(pvals_16S_L_df)[1] <- "G3 Larvae ATC"
 rownames(pvals_COXI_L_df)[1] <- "G3 Larvae ATC"
 
-
-
 pvals_16S_A_df <- cbind(pvals_16S_A_df,empty_column=NA)
 pvals_COXI_A_df <- cbind(pvals_COXI_A_df,empty_column=NA)
 pvals_16S_L_df <- cbind(pvals_16S_L_df,empty_column=NA)
@@ -1709,55 +1657,64 @@ pvals_COXI_A_df.sym <- Matrix::forceSymmetric(as.matrix(pvals_COXI_A_df),uplo="L
 pvals_COXI_L_df.sym <- Matrix::forceSymmetric(as.matrix(pvals_COXI_L_df),uplo="L")
 
 # add new columns to the qPCRstats data
-qPCRstats[,9:10] <- c(NA,NA)
+qPCRstats[,10:11] <- c(NA,NA)
 
 # get letters denoting significantly different groups (p<0.05)
 
 letters1 <- multcompLetters(pvals_16S_A_df.sym)$Letters
 letters2 <- multcompLetters(pvals_16S_L_df.sym)$Letters
-for (x in 1:54) {qPCRstats[x, 9] <- c(letters1, letters2)[[qPCRstats$group[x]]]}
+for (x in 1:54) {qPCRstats[x, 10] <- c(letters1, letters2)[[qPCRstats$group[x]]]}
 
 letters3 <- multcompLetters(pvals_COXI_A_df.sym)$Letters
 letters4 <- multcompLetters(pvals_COXI_L_df.sym)$Letters
-for (x in 1:54) {qPCRstats[x, 10] <- c(letters3, letters4)[[qPCRstats$group[x]]]}
+for (x in 1:54) {qPCRstats[x, 11] <- c(letters3, letters4)[[qPCRstats$group[x]]]}
 
 # make new columns in qPCRstats with max values -- this will help us plot the letters above data points on the graph
-for (x in 1:54) {qPCRstats[x, 11] <- min(qPCRstats[qPCRstats$group == qPCRstats$group[x],7])}
-for (x in 1:54) {qPCRstats[x, 12] <- min(qPCRstats[qPCRstats$group == qPCRstats$group[x],8])}
+for (x in 1:54) {qPCRstats[x, 12] <- max(qPCRstats[qPCRstats$group == qPCRstats$group[x],8])}
+for (x in 1:54) {qPCRstats[x, 13] <- max(qPCRstats[qPCRstats$group == qPCRstats$group[x],9])}
 
 # rename columns for easier plotting
-colnames(qPCRstats)[9:12] <- c("letters_16S","letters_COXI","maxes_16S","maxes_COXI") 
+colnames(qPCRstats)[10:13] <- c("letters_16S","letters_COXI","maxes_16S","maxes_COXI") 
 
 ### qPCR plots ###
 
-
+group_colors <- c("G3 Larvae DOX" = "#CD96CD","G4 Larvae DOX" = "#8B668B","G3 Adults DOX" = "#CD96CD","G4 Adults DOX" = "#8B668B","G3 Adults ATC" = "#35C47D","G4 Adults ATC" = "#199151","G3 Larvae ATC" = "#35C47D","G4 Larvae ATC" = "#199151","G3 Larvae H2O" = "#5CACEE","G4 Larvae H2O" = "#1874CD","G3 Adults H2O" = "#5CACEE","G4 Adults H2O" = "#1874CD")
 # Plot the COXI data
-final_plot_COXI <- ggplot(qPCRstats, aes(forcats::fct_relevel(G3diet, "DOX", "ATC", "H2O"), -1*ddCtCOXI, group=generation, color=generation)) + 
-scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_rect(colour = "black"),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=20), legend.text = element_text(size=10)) + 
-scale_y_continuous(limits = c(-2, 2)) + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + 
-xlab("G1-G3 Diet") + ylab("-\u0394\u0394Ct: COXI") + geom_hline(yintercept=0,alpha=0.3,linetype="dashed") + 
-geom_text(aes(label = str_trim(letters_COXI), y = rep(1.8,54)), vjust = -0.5, position=position_dodge(width=0.7),size=5,color="black") + 
-theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
+final_plot_COXI <- ggplot(qPCRstats, aes(forcats::fct_relevel(G3diet, "DOX", "ATC", "H2O"), -1*ddCtCOXI, group=generation, color=group)) + 
+  scale_color_manual(values = group_colors) + 
+  geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + theme(strip.background = element_rect(colour = "black"),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=20), legend.text = element_text(size=10)) + 
+  scale_y_continuous(limits = c(-2, 2)) + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + 
+  xlab("G1-G3 Diet") + ylab("-\u0394\u0394Ct: COXI") + 
+  geom_hline(yintercept=0,alpha=0.3,linetype="dashed") + 
+  geom_text(aes(label = str_trim(letters_COXI), y = rep(1.8,54)), vjust = -0.5, position=position_dodge(width=0.7),size=5,color="black") + 
+  theme(legend.position = "none", axis.title.x = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank()) + 
+  facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults"), strip = strip)
 
+final_plot_COXI
 
 # Plot the 16S data
-final_plot_16S <- ggplot(qPCRstats, aes(forcats::fct_relevel(G3diet, "DOX", "ATC", "H2O"), -1*ddCt16S, group=generation, color=generation)) + 
-scale_color_manual(values = c("G3" = "salmon2", "G4" = "#5764ba")) + geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + 
-theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=0), legend.text = element_text(size=10)) + scale_y_continuous(limits = c(-6, 6)) + 
-stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + 
-stat_summary(fun.data=mean_se, color=c("salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba","salmon2","salmon2","salmon2","#5764ba","#5764ba","#5764ba"),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + 
-xlab("G1-G3 Diet") + ylab("-\u0394\u0394Ct: 16S") + geom_hline(yintercept=0,alpha=0.3,linetype="dashed") + theme(legend.position = "none", axis.title.x = element_blank(),axis.text.x = element_blank()) + 
-facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults")) + 
-geom_text(aes(label = str_trim(letters_16S), y = rep(5.6,54)), vjust = -0.5, position=position_dodge(width=0.7),size=5,color="black")
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+final_plot_16S <- ggplot(qPCRstats, aes(forcats::fct_relevel(G3diet, "DOX", "ATC", "H2O"), -1*ddCt16S, group=generation, color=group)) + 
+  scale_color_manual(values = group_colors) +
+  geom_point(size=2.5,shape=16,alpha=1,position = position_jitterdodge(jitter.width = 0, dodge.width = .7)) + 
+  theme(strip.background = element_blank(),panel.border = element_rect(linetype = "solid", fill = NA), panel.background = element_rect(fill = "white", colour = "grey30"), panel.grid.minor=element_blank(), axis.title.x = element_text(size=15),  axis.title.y = element_text(size=15), axis.text.y = element_text(size=18), axis.text.x = element_text(size=12, angle = 0, vjust = 0, hjust=0.5), strip.text.x= element_text(size=0), legend.text = element_text(size=10)) + 
+  scale_y_continuous(limits = c(-6, 6)) + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),position=position_dodge(width=0.7), size=0.6, width=0.4, geom="errorbar") + 
+  stat_summary(fun.data=mean_se, color=c(rep(c("#CD96CD","#35C47D","#5CACEE","#8B668B","#199151","#1874CD"),2)),geom="point",position=position_dodge(width=0.7), size=2.5, shape=15) + 
+  xlab("G1-G3 Diet") + 
+  ylab("-\u0394\u0394Ct: 16S") + 
+  geom_hline(yintercept=0,alpha=0.3,linetype="dashed") +
+  theme(legend.position = "none", axis.title.x = element_blank(),axis.text.x = element_blank()) + 
+  facet_wrap2(~forcats::fct_relevel(stage, "Larvae", "Adults")) + 
+  geom_text(aes(label = str_trim(letters_16S), y = rep(5.6,54)), vjust = -0.5, position=position_dodge(width=0.7),size=5,color="black")
+final_plot_16S 
+
 mean(qPCRstats$ddCt16S[c(49:54)]) # G4 DOX A
 mean(qPCRstats$ddCt16S[c(22:27)]) # G3 DOX A
 mean(qPCRstats$ddCt16S[c(43:48)]) # G4 ATC A
 mean(qPCRstats$ddCt16S[c(16:21)]) # G3 ATC A
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
 
 # Plot both graphs in vertical stack
 qPCR_plots_vertical <- plot_grid(final_plot_COXI, final_plot_16S, ncol=1, align="v")
 qPCR_plots_vertical
-
+# export portrait, 11x8"
